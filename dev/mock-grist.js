@@ -1,14 +1,19 @@
 /* Faux Grist pour tester le widget dans un simple navigateur (voir dev/index.html).
    Il imite uniquement la partie de grist-plugin-api.js utilisée par widget.js,
-   avec la même structure de tables que le document Grist (Annuaire, Etablissement, Evenements, Presences).
+   avec la même structure de tables que le document Grist (Annuaire, Etablissement, Evenements).
+   Les présences sont dans l'Annuaire, comme dans le vrai document : deux colonnes « liste de références ».
    Ne sert qu'au développement : il n'est jamais chargé par index.html.
 
    Options d'URL :  ?moi=2          se connecter comme la personne n° 2 (1 par défaut)
                     ?restreint      l'Annuaire ne montre que sa propre ligne (au lieu de masquer les e-mails des autres)
                     ?ambigu         tous les e-mails de l'Annuaire sont lisibles : personne n'est reconnu
                     ?anonyme        aucun e-mail lisible : personne non reconnue
-                    ?colonne-manquante  la table Presences n'a pas de colonne « Statut »
-                    ?vide           démarrer sans aucune présence */
+                    ?sans-colonnes  l'Annuaire n'a pas encore les colonnes de présence : le widget doit les créer
+                    ?sans-droits    ... mais la structure du document n'est pas modifiable par cette personne
+                    ?ecriture-refusee  les règles d'accès refusent toute modification de l'Annuaire
+                    ?vide           démarrer sans aucune présence
+
+   Pour les tests : window.MOCK_ACTIONS liste les lots d'actions reçus par applyUserActions. */
 (function () {
   const params = new URLSearchParams(location.search);
 
@@ -40,83 +45,80 @@
   ];
   const moiId = Number(params.get('moi')) || 1;
   const parId = (id) => ANNUAIRE.find((p) => p.id === id);
-  const logoDe = (p) => (ETABLISSEMENTS.find((e) => e.nom_de_domaine === p.nom_de_domaine) || {}).Logo || '';
 
-  // --- Table Presences ----------------------------------------------------------------------
-  const COLONNES_PRESENCES = ['id', 'Evenement', 'Utilisateur', 'Statut', 'Nom', 'Prenom', 'Logo'];
-  let prochainId = 1;
-  let presences = [];
-  const ligne = (evt, personneId, statut) => {
-    const p = parId(personneId);
-    return { id: prochainId++, Evenement: evt, Utilisateur: personneId, Statut: statut, Nom: p.nom, Prenom: p.prenom, Logo: logoDe(p) };
-  };
-  if (!params.has('vide')) {
-    // [événement, personne, statut] — « sûr » et « probable » (ancienne version du widget) restent lus
-    const demo = [[1, 3, 'sûr'], [1, 4, 'probable'], [2, 5, 'présent'], [5, 2, 'présent'], [5, 6, 'présent'], [5, 7, 'à confirmer'], [5, 8, 'présent'], [5, 3, 'à confirmer'],
-      [7, 5, 'présent'], [9, 1, 'présent'], [9, 5, 'présent'], [9, 8, 'présent'], [9, 4, 'à confirmer'], [9, 6, 'présent'], [9, 7, 'présent'], [17, 6, 'présent'], [19, 2, 'à confirmer'],
-      [19, 5, 'présent'], [21, 3, 'présent'], [22, 8, 'présent'], [26, 4, 'présent'], [26, 6, 'présent'], [26, 7, 'présent'], [26, 3, 'présent'], [26, 8, 'à confirmer'],
-      [7, moiId, 'à confirmer']];
-    demo.forEach(([e, p, s]) => presences.push(ligne(e, p, s)));
+  // --- Présences : deux colonnes de l'Annuaire (listes d'identifiants d'événements) --------------
+  const COL_SUR = 'Evenements_presents';
+  const COL_PROBABLE = 'Evenements_a_confirmer';
+  const colonnes = params.has('sans-colonnes') ? [] : [COL_SUR, COL_PROBABLE];
+  const listes = new Map();   // identifiant de personne -> { sur: [...], probable: [...] }
+  const listesDe = (id) => { if (!listes.has(id)) listes.set(id, { sur: [], probable: [] }); return listes.get(id); };
+  const retirerEvt = (id, evt) => { const l = listesDe(id); l.sur = l.sur.filter((x) => x !== evt); l.probable = l.probable.filter((x) => x !== evt); };
+  const ajouterEvt = (id, evt, statut) => { retirerEvt(id, evt); listesDe(id)[statut].push(evt); };
+  if (!params.has('vide') && !params.has('sans-colonnes')) {
+    // [événement, personne, statut]
+    const demo = [[1, 3, 'sur'], [1, 4, 'probable'], [2, 5, 'sur'], [5, 2, 'sur'], [5, 6, 'sur'], [5, 7, 'probable'], [5, 8, 'sur'], [5, 3, 'probable'],
+      [7, 5, 'sur'], [9, 1, 'sur'], [9, 5, 'sur'], [9, 8, 'sur'], [9, 4, 'probable'], [9, 6, 'sur'], [9, 7, 'sur'], [17, 6, 'sur'], [19, 2, 'probable'],
+      [19, 5, 'sur'], [21, 3, 'sur'], [22, 8, 'sur'], [26, 4, 'sur'], [26, 6, 'sur'], [26, 7, 'sur'], [26, 3, 'sur'], [26, 8, 'probable'],
+      [7, moiId, 'probable']];
+    demo.forEach(([e, p, s]) => ajouterEvt(p, e, s));
   }
+  // Ce que renvoie Grist : liste encodée ['L', ...] ou, quand elle est vide, null (les deux formes sont lues par le widget)
+  const enListe = (ids, id) => (ids.length ? (id % 2 ? ['L', ...ids] : [...ids]) : null);
 
   // --- Ce que Grist renvoie pour l'Annuaire selon les règles d'accès --------------------------
   function annuaireVisible() {
-    if (params.has('restreint')) return [parId(moiId)];
+    const avecPresences = (p) => ({
+      ...p,
+      ...(colonnes.includes(COL_SUR) ? { [COL_SUR]: enListe(listesDe(p.id).sur, p.id) } : {}),
+      ...(colonnes.includes(COL_PROBABLE) ? { [COL_PROBABLE]: enListe(listesDe(p.id).probable, p.id) } : {}),
+    });
+    if (params.has('restreint')) return [avecPresences(parId(moiId))];
     return ANNUAIRE.map((p) => {
       const lisible = params.has('ambigu') || (p.id === moiId && !params.has('anonyme'));
-      return lisible ? p : { ...p, email: ['C'] };   // ['C'] : cellule masquée par les règles d'accès
+      return avecPresences(lisible ? p : { ...p, email: ['C'] });   // ['C'] : cellule masquée par les règles d'accès
     });
   }
 
   // --- API simulée ---------------------------------------------------------------------------
   const attendre = (ms = 150) => new Promise((r) => setTimeout(r, ms));
-  let rappel = null;
-  const notifier = () => setTimeout(() => rappel && rappel(presences.map((p) => ({ ...p })), null), 120);
-  const enColonnes = (lignes, colonnes = Object.keys(lignes[0] || { id: 0 })) =>
-    Object.fromEntries(colonnes.map((c) => [c, lignes.map((l) => l[c])]));
+  const enColonnes = (lignes, cols = Object.keys(lignes[0] || { id: 0 })) =>
+    Object.fromEntries(cols.map((c) => [c, lignes.map((l) => l[c])]));
+  window.MOCK_ACTIONS = [];
 
   window.grist = {
     simule: true,
     ready(options) {
       console.info('[faux Grist] ready', options);
-      notifier();
-    },
-    onRecords(cb, options) {
-      console.info('[faux Grist] onRecords', options);
-      rappel = cb;
-    },
-    selectedTable: { async getTableId() { return 'Presences'; } },
-    getTable() {
-      return {
-        async create({ fields }) {
-          await attendre();
-          const p = parId(fields.Utilisateur);
-          presences.push({ id: prochainId++, Nom: p.nom, Prenom: p.prenom, Logo: logoDe(p), ...fields });
-          notifier();
-        },
-        async update({ id, fields }) {
-          await attendre();
-          Object.assign(presences.find((p) => p.id === id), fields);
-          notifier();
-        },
-        async destroy(ids) {
-          await attendre();
-          presences = presences.filter((p) => ![].concat(ids).includes(p.id));
-          notifier();
-        },
-      };
     },
     docApi: {
       async fetchTable(nom) {
         await attendre(40);
         if (nom === 'Evenements') return enColonnes(window.MOCK_EVENEMENTS);
-        if (nom === 'Annuaire') return enColonnes(annuaireVisible());
+        if (nom === 'Annuaire') return enColonnes(annuaireVisible(), ['id', 'prenom', 'nom', 'email', 'Etablissement', 'nom_de_domaine', ...colonnes]);
         if (nom === 'Etablissement') return enColonnes(ETABLISSEMENTS);
-        if (nom === 'Presences') {
-          const colonnes = params.has('colonne-manquante') ? COLONNES_PRESENCES.filter((c) => c !== 'Statut') : COLONNES_PRESENCES;
-          return enColonnes(presences, colonnes);
-        }
         throw new Error(`Table inconnue : ${nom}`);
+      },
+      async applyUserActions(actions) {
+        await attendre();
+        window.MOCK_ACTIONS.push(JSON.parse(JSON.stringify(actions)));
+        for (const [type, table, ...args] of actions) {
+          if (table !== 'Annuaire') throw new Error(`Table inconnue : ${table}`);
+          if (type === 'AddColumn') {
+            if (params.has('sans-droits')) throw new Error('Blocked by table structure access rules');
+            if (!colonnes.includes(args[0])) colonnes.push(args[0]);
+          } else if (type === 'UpdateRecord') {
+            const [id, champs] = args;
+            if (params.has('ecriture-refusee') || id !== moiId) throw new Error('Blocked by table update access rules');
+            for (const [col, valeur] of Object.entries(champs)) {
+              if (!colonnes.includes(col)) throw new Error(`Colonne inconnue : ${col}`);
+              const ids = (Array.isArray(valeur) ? valeur.filter((x) => x !== 'L') : []);
+              listesDe(id)[col === COL_SUR ? 'sur' : 'probable'] = ids;
+            }
+          } else {
+            throw new Error(`Action inconnue : ${type}`);
+          }
+        }
+        return actions.map(() => null);
       },
       async getAccessToken() { return { token: 'faux', baseUrl: 'https://exemple.invalid/api/docs/x', ttlMsecs: 600000 }; },
     },
@@ -126,18 +128,18 @@
   window.addEventListener('DOMContentLoaded', () => {
     const barre = document.createElement('div');
     barre.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:20;display:flex;gap:8px;align-items:center;padding:6px 12px;background:#222;color:#fff;font:12px Arial';
-    barre.innerHTML = '<span>Faux Grist</span><button id="simuler" style="font:inherit">Un autre participant bouge</button><span id="simuler-info" style="opacity:.7"></span>';
+    barre.innerHTML = '<span>Faux Grist</span><button id="simuler" style="font:inherit">Un autre participant bouge</button><span id="simuler-info" style="opacity:.7">(visible dans les 5 s)</span>';
     document.body.appendChild(barre);
     document.body.style.paddingBottom = '56px';
     document.getElementById('simuler').addEventListener('click', () => {
       const autres = ANNUAIRE.filter((p) => p.id !== moiId);
       const p = autres[Math.floor(Math.random() * autres.length)];
       const evt = 1 + Math.floor(Math.random() * window.MOCK_EVENEMENTS.length);
-      const existante = presences.find((l) => l.Evenement === evt && l.Utilisateur === p.id);
-      if (existante) presences = presences.filter((l) => l !== existante);
-      else presences.push(ligne(evt, p.id, Math.random() < 0.6 ? 'présent' : 'à confirmer'));
+      const l = listesDe(p.id);
+      const existante = l.sur.includes(evt) || l.probable.includes(evt);
+      if (existante) retirerEvt(p.id, evt);
+      else ajouterEvt(p.id, evt, Math.random() < 0.6 ? 'sur' : 'probable');
       document.getElementById('simuler-info').textContent = `${p.prenom} ${existante ? 'se retire de' : 'ajoute'} l’événement ${evt}`;
-      notifier();
     });
   });
 })();

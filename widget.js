@@ -6,11 +6,12 @@
 
    Tables Grist utilisées :
    - Evenements    : import de l’Excel fourni (data/Evenements_Semaine_Innovation_2026.xlsx)
-   - Annuaire      : une ligne par personne (nom, prénom, e-mail, établissement)
+   - Annuaire      : une ligne par personne (nom, prénom, e-mail, établissement) ; les présences
+                     y sont enregistrées, dans deux colonnes que le widget crée lui-même
+                     à la première ouverture (CONFIG.annuaire.presents et .aConfirmer)
    - Etablissement : le logo de chaque établissement
-   - Presences     : une ligne par personne et par événement ; c’est la table à laquelle
-                     on lie le widget. Ses colonnes sont lues par leur nom (CONFIG.presences) :
-                     rien à associer dans le panneau du widget.
+   Le widget peut être lié à n’importe quelle table (par exemple « Participations ») : il ne lit
+   que les tables ci-dessus, avec docApi, et n’a rien à associer dans le panneau du widget.
    ============================================================================ */
 
 /* ----------------------------------------------------------------------------
@@ -30,11 +31,14 @@ const CONFIG = {
   },
   // Colonnes de la table Annuaire.
   annuaire: {
-    email: 'email',                      // sert à reconnaître la personne connectée (voir chargerMoi)
+    email: 'email',                      // sert à reconnaître la personne connectée (voir identifierMoi)
     nom: 'nom',
     prenom: 'prenom',
     domaine: 'nom_de_domaine',           // lien avec l’établissement (en priorité)
     etablissement: 'Etablissement',      // texte : lien avec l’établissement, si le domaine ne suffit pas
+    // Les présences : deux listes d’événements par personne, créées par le widget si elles n’existent pas.
+    presents: 'Evenements_presents',
+    aConfirmer: 'Evenements_a_confirmer',
   },
   // Colonnes de la table Etablissement.
   etablissements: {
@@ -42,20 +46,17 @@ const CONFIG = {
     domaine: 'nom_de_domaine',
     logo: 'Logo',                        // colonne Pièces jointes, ou lien web (https://…)
   },
-  // Colonnes de la table Presences (celle à laquelle le widget est lié).
-  presences: {
-    evenement: 'Evenement',              // Référence → Evenements
-    utilisateur: 'Utilisateur',          // Référence → Annuaire
-    statut: 'Statut',
-    nom: 'Nom',                          // formule : $Utilisateur.nom
-    prenom: 'Prenom',                    // formule : $Utilisateur.prenom
-    logo: 'Logo',                        // formule : logo de l’établissement (voir README)
-  },
-  // Valeurs écrites dans la colonne « Statut » de la table Presences
-  // (les anciennes valeurs « sûr » et « probable » sont toujours reconnues à la lecture).
-  statuts: { sur: 'présent', probable: 'à confirmer' },
-  // Les événements changent rarement : on les relit à cet intervalle (les présences, elles, arrivent en direct).
+  // Grist ne prévient le widget que des changements de la table à laquelle il est lié : les présences
+  // (dans l’Annuaire) sont donc relues à cet intervalle, ce qui fait « le direct ».
+  directMs: 5000,
+  // Les événements et les logos changent rarement : on les relit à cet intervalle.
   rafraichissementMs: 60000,
+};
+
+/* Libellés des deux colonnes créées dans l’Annuaire. */
+const ETIQUETTES_COLONNES = {
+  [CONFIG.annuaire.presents]: 'Événements : présent',
+  [CONFIG.annuaire.aConfirmer]: 'Événements : à confirmer',
 };
 
 /* Libellés affichés (les codes internes restent « sur » et « probable »). */
@@ -72,13 +73,20 @@ const MOIS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 
    ---------------------------------------------------------------------------- */
 const etat = {
   evenements: [],              // lus dans la table Evenements
-  presences: [],               // lues en direct dans la table Presences
-  moi: null,                   // { id, nom, prenom, logo } : ma ligne dans la table ACL
+  etablissements: [],          // lignes de la table Etablissement
+  logos: { parDomaine: new Map(), parNom: new Map() },   // index des logos, construit au chargement
+  annuaire: [],                // une entrée par personne : { id, nom, prenom, domaine, etablissement, email, presents, aConfirmer }
+  presences: [],               // une entrée par personne et par événement, déduite de l’annuaire
+  moi: null,                   // { id, nom, prenom, logo } : ma ligne dans l’Annuaire
   messageMoi: '',              // pourquoi moi est vide (mode lecture seule)
-  erreurColonnes: '',          // colonnes de Presences introuvables
+  erreurColonnes: '',          // colonnes de présence absentes de l’Annuaire et impossibles à créer
   erreur: '',                  // problème de lecture de la table Evenements
+  pret: false,                 // vrai dès que le premier chargement est terminé
+  sequence: 0,                 // numéro de la dernière lecture de l’Annuaire (les lectures dépassées sont ignorées)
+  creationTentee: false,       // les colonnes manquantes ne sont créées qu’une fois par ouverture
+  signature: '',               // contenu de l’Annuaire à l’affichage précédent
   focus: null,                 // élément à refocaliser après un nouvel affichage
-  choixEnCours: new Map(),     // evenementId -> { statut, ecrit } : mon choix pendant son enregistrement
+  choixEnCours: new Map(),     // evenementId -> { statut, ecrit, quand } : mon choix jusqu’à sa confirmation par l’Annuaire
   verrous: new Set(),          // evenements dont l’écriture est en cours
   jour: null,                  // onglet affiché (écrans étroits)
   seulementMesEvenements: false,
@@ -91,7 +99,8 @@ const el = (id) => document.getElementById(id);
 /* ----------------------------------------------------------------------------
    Petits utilitaires de lecture des valeurs Grist
    ---------------------------------------------------------------------------- */
-const texte = (v) => (v == null ? '' : String(v)).trim();
+// Une cellule masquée par les règles d’accès arrive sous la forme ['C'] : elle compte comme vide.
+const texte = (v) => (v == null || Array.isArray(v) ? '' : String(v)).trim();
 
 const echapper = (v) => texte(v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -101,13 +110,6 @@ const sansAccent = (v) => texte(v).normalize('NFD').replace(/[̀-ͯ]/g, '').toLo
 const liste = (v) => (Array.isArray(v) ? (v[0] === 'L' ? v.slice(1) : v) : []);
 
 const urlSure = (v) => (/^https?:\/\//i.test(texte(v)) ? texte(v) : '');
-
-function codeStatut(v) {
-  const s = sansAccent(v);
-  if (/^(present|sur)/.test(s)) return 'sur';
-  if (/^(a confirmer|prob)/.test(s)) return 'probable';
-  return null;
-}
 
 /** Date Grist (secondes depuis 1970, objet Date ou texte) -> 'AAAA-MM-JJ'. */
 function versIso(v) {
@@ -186,21 +188,50 @@ async function chargerEvenements() {
   rendre();
 }
 
-/** Logo de l’établissement d’une personne de l’Annuaire : par nom de domaine, sinon par nom. */
-async function chercherLogo(personne) {
+/** Logos des établissements, indexés par nom de domaine puis par nom (une seule normalisation par ligne). */
+async function chargerEtablissements() {
   try {
-    const c = CONFIG.annuaire;
     const e = CONFIG.etablissements;
-    const domaine = sansAccent(personne[c.domaine]);
-    const nom = sansAccent(personne[c.etablissement]);
-    const lignes = lignesDeTable(await grist.docApi.fetchTable(CONFIG.tables.etablissements));
-    const trouve = lignes.find((l) => domaine && sansAccent(l[e.domaine]) === domaine)
-      || lignes.find((l) => nom && sansAccent(l[e.nom]) === nom);
-    return trouve ? trouve[e.logo] : null;
+    etat.etablissements = lignesDeTable(await grist.docApi.fetchTable(CONFIG.tables.etablissements));
+    etat.logos = { parDomaine: new Map(), parNom: new Map() };
+    for (const l of etat.etablissements) {
+      const domaine = sansAccent(l[e.domaine]);
+      const nom = sansAccent(l[e.nom]);
+      if (domaine && !etat.logos.parDomaine.has(domaine)) etat.logos.parDomaine.set(domaine, l[e.logo]);
+      if (nom && !etat.logos.parNom.has(nom)) etat.logos.parNom.set(nom, l[e.logo]);
+    }
   } catch (err) {
     console.error('Logos des établissements indisponibles', err);
-    return null;
   }
+  if (etat.pret) {   // les logos viennent de changer : on met à jour les avatars déjà affichés
+    appliquerAnnuaire();
+    await preparerJeton(tousLesLogos());
+    rendre();
+  }
+}
+
+/** Logo de l’établissement d’une personne de l’Annuaire : par nom de domaine, sinon par nom. */
+function trouverLogo(personne) {
+  const { parDomaine, parNom } = etat.logos;
+  const logo = parDomaine.get(sansAccent(personne.domaine)) ?? parNom.get(sansAccent(personne.etablissement));
+  return logo ?? null;
+}
+
+const idsDeListe = (v) => liste(v).filter(Number.isInteger);
+
+/** Annuaire (colonnes-tableaux renvoyées par Grist) -> liste de personnes. */
+function lirePersonnes(table) {
+  const c = CONFIG.annuaire;
+  return lignesDeTable(table).map((l) => ({
+    id: l.id,
+    nom: texte(l[c.nom]),
+    prenom: texte(l[c.prenom]),
+    domaine: texte(l[c.domaine]),
+    etablissement: texte(l[c.etablissement]),
+    email: texte(l[c.email]),
+    presents: idsDeListe(l[c.presents]),
+    aConfirmer: idsDeListe(l[c.aConfirmer]),
+  }));
 }
 
 /**
@@ -210,63 +241,86 @@ async function chercherLogo(personne) {
  * (on ne voit alors que sa ligne). La ligne dont l’e-mail est lisible est la mienne.
  * C’est la seule fonction à adapter si l’identification se fait autrement.
  */
-async function chargerMoi() {
+function identifierMoi() {
+  const miennes = etat.annuaire.filter((p) => p.email);
+  if (miennes.length === 1) {
+    const { id, nom, prenom } = miennes[0];
+    etat.moi = { id, nom, prenom, logo: trouverLogo(miennes[0]) };
+    etat.messageMoi = '';
+  } else {
+    etat.moi = null;
+    etat.messageMoi = miennes.length
+      ? `Plusieurs e-mails sont lisibles dans la table « ${CONFIG.tables.annuaire} » : une règle d’accès doit réserver la colonne e-mail à sa propre ligne.`
+      : 'Vous n’êtes pas reconnu(e) : connectez-vous avec votre compte pour indiquer votre présence.';
+  }
+}
+
+/** Annuaire -> moi + une présence par personne et par événement. Les logos se retrouvent par l’établissement. */
+function appliquerAnnuaire() {
+  identifierMoi();
+  etat.presences = [];
+  for (const p of etat.annuaire) {
+    if (!p.presents.length && !p.aConfirmer.length) continue;
+    const logo = trouverLogo(p);
+    for (const [evenements, statut] of [[p.presents, 'sur'], [p.aConfirmer, 'probable']]) {
+      for (const evenement of evenements) etat.presences.push({ evenement, utilisateur: p.id, statut, nom: p.nom, prenom: p.prenom, logo });
+    }
+  }
+}
+
+const tousLesLogos = () => etat.presences.map((p) => p.logo).concat(etat.moi ? [etat.moi.logo] : []);
+
+/** Crée dans l’Annuaire les colonnes de présence qui manquent. Renvoie vrai si elles existent ensuite. */
+async function creerColonnes(manquantes) {
+  try {
+    const type = `RefList:${CONFIG.tables.evenements}`;
+    await grist.docApi.applyUserActions(manquantes.map((id) =>
+      ['AddColumn', CONFIG.tables.annuaire, id, { type, isFormula: false, label: ETIQUETTES_COLONNES[id] }]));
+    alerter(`Configuration terminée : ${manquantes.length > 1 ? 'colonnes ajoutées' : 'colonne ajoutée'} à la table « ${CONFIG.tables.annuaire} ».`);
+    return true;
+  } catch (err) {
+    console.error('Création des colonnes impossible', err);
+    return false;
+  }
+}
+
+/**
+ * Lit l’Annuaire : qui est là, qui vient à quoi. Appelée au démarrage, à intervalle régulier,
+ * et juste après chacun de mes enregistrements.
+ */
+async function chargerAnnuaire() {
+  const numero = ++etat.sequence;
   try {
     const c = CONFIG.annuaire;
-    const lignes = lignesDeTable(await grist.docApi.fetchTable(CONFIG.tables.annuaire));
-    const miennes = lignes.filter((l) => typeof l[c.email] === 'string' && l[c.email].trim());
-    if (miennes.length === 1) {
-      const l = miennes[0];
-      etat.moi = { id: l.id, nom: texte(l[c.nom]), prenom: texte(l[c.prenom]), logo: await chercherLogo(l) };
-      etat.messageMoi = '';
-      await preparerJeton([etat.moi.logo]);   // avant le premier affichage du logo
-    } else {
-      etat.moi = null;
-      etat.messageMoi = miennes.length
-        ? `Plusieurs e-mails sont lisibles dans la table « ${CONFIG.tables.annuaire} » : une règle d’accès doit réserver la colonne e-mail à sa propre ligne.`
-        : 'Vous n’êtes pas reconnu(e) : connectez-vous avec votre compte pour indiquer votre présence.';
+    let table = await grist.docApi.fetchTable(CONFIG.tables.annuaire);
+    let manquantes = [c.presents, c.aConfirmer].filter((nom) => !(nom in table));
+    if (manquantes.length && !etat.creationTentee) {
+      etat.creationTentee = true;
+      if (await creerColonnes(manquantes)) {
+        table = await grist.docApi.fetchTable(CONFIG.tables.annuaire);
+        manquantes = [c.presents, c.aConfirmer].filter((nom) => !(nom in table));
+      }
     }
+    if (numero !== etat.sequence) return;   // une lecture plus récente a démarré : celle-ci est dépassée
+    etat.erreurColonnes = manquantes.length
+      ? `Il manque ${manquantes.length > 1 ? 'les colonnes' : 'la colonne'} ${manquantes.join(', ')} dans la table « ${CONFIG.tables.annuaire} », et le widget n’a pas pu ${manquantes.length > 1 ? 'les créer' : 'la créer'} : ouvrez-le une fois avec un compte qui peut modifier la structure du document.`
+      : '';
+    etat.annuaire = lirePersonnes(table);
+    appliquerAnnuaire();
+    confirmerMesChoix();
+    await preparerJeton(tousLesLogos());   // avant l’affichage des logos en pièce jointe
   } catch (err) {
     console.error(err);
+    if (etat.pret) return;   // panne passagère : on garde ce qui est affiché
+    etat.annuaire = [];
+    etat.presences = [];
     etat.moi = null;
     etat.messageMoi = `Table « ${CONFIG.tables.annuaire} » inaccessible : identification impossible.`;
   }
+  const signature = JSON.stringify([etat.annuaire, etat.messageMoi, etat.erreurColonnes]);
+  if (signature === etat.signature && etat.pret) return;   // rien n’a changé : on évite de reconstruire la page
+  etat.signature = signature;
   rendre();
-}
-
-function recevoirPresences(enregistrements) {
-  const c = CONFIG.presences;
-  etat.presences = enregistrements
-    .map((r) => ({
-      id: r.id,
-      evenement: Number(r[c.evenement]) || 0,
-      utilisateur: Number(r[c.utilisateur]) || 0,
-      statut: codeStatut(r[c.statut]),
-      nom: texte(r[c.nom]),
-      prenom: texte(r[c.prenom]),
-      logo: r[c.logo],
-    }))
-    .filter((p) => p.evenement && p.statut);
-  // Mes choix sont maintenant confirmés par les données du serveur
-  for (const [id, choix] of etat.choixEnCours) if (choix.ecrit) etat.choixEnCours.delete(id);
-  preparerJeton(etat.presences.map((p) => p.logo)).then((nouveau) => nouveau && rendre());
-  rendre();
-}
-
-/** Prévient (en haut de page) si la table liée au widget n’a pas les colonnes attendues. */
-async function verifierColonnes() {
-  try {
-    const id = await grist.selectedTable.getTableId();
-    const table = await grist.docApi.fetchTable(id);
-    const c = CONFIG.presences;
-    const manquantes = [c.evenement, c.utilisateur, c.statut, c.nom, c.prenom].filter((nom) => !(nom in table));
-    etat.erreurColonnes = manquantes.length
-      ? `Colonnes introuvables dans la table « ${id} » : ${manquantes.join(', ')}. Ajoutez-les ou corrigez CONFIG.presences dans widget.js.`
-      : '';
-    rendre();
-  } catch (err) {
-    console.warn('Vérification des colonnes impossible', err);   // facultative
-  }
 }
 
 /* ----------------------------------------------------------------------------
@@ -294,11 +348,17 @@ function logoSrc(v) {
 /* ----------------------------------------------------------------------------
    Présences : calcul à partir des données
    ---------------------------------------------------------------------------- */
-function monStatut(evenementId) {
+/** Mon statut tel qu’il est enregistré dans l’Annuaire. */
+function statutEnregistre(evenementId) {
   if (!etat.moi) return null;
-  if (etat.choixEnCours.has(evenementId)) return etat.choixEnCours.get(evenementId).statut;
   const miennes = etat.presences.filter((p) => p.evenement === evenementId && p.utilisateur === etat.moi.id);
   return miennes.some((p) => p.statut === 'sur') ? 'sur' : miennes.length ? 'probable' : null;
+}
+
+/** Mon statut affiché : mon dernier clic, sans attendre que l’Annuaire le confirme. */
+function monStatut(evenementId) {
+  if (!etat.moi) return null;
+  return etat.choixEnCours.has(evenementId) ? etat.choixEnCours.get(evenementId).statut : statutEnregistre(evenementId);
 }
 
 /** Participants d’un événement, présents d’abord, moi inclus avec mon choix à jour. */
@@ -322,18 +382,43 @@ const typo = (v) => echapper(v).replace(/ ([:;!?»])/g, `${NBSP}$1`).replace(/«
 
 const nomComplet = (p) => `${p.prenom} ${p.nom}`.trim();
 
-async function ecrirePresence(evenementId, cible) {
-  const c = CONFIG.presences;
-  const table = grist.getTable();
-  const miennes = etat.presences.filter((p) => p.evenement === evenementId && p.utilisateur === etat.moi.id);
-  const [gardee, ...doublons] = miennes;
-  if (!cible) {
-    if (miennes.length) await table.destroy(miennes.map((p) => p.id));
-  } else if (gardee) {
-    await table.update({ id: gardee.id, fields: { [c.statut]: CONFIG.statuts[cible] } });
-    if (doublons.length) await table.destroy(doublons.map((p) => p.id));
-  } else {
-    await table.create({ fields: { [c.evenement]: evenementId, [c.utilisateur]: etat.moi.id, [c.statut]: CONFIG.statuts[cible] } });
+/** Mes deux listes d’événements (présent, à confirmer) : l’Annuaire, corrigé par mes clics en cours. */
+function mesListes() {
+  const sur = new Set();
+  const probable = new Set();
+  for (const p of etat.presences) {
+    if (p.utilisateur === etat.moi.id) (p.statut === 'sur' ? sur : probable).add(p.evenement);
+  }
+  for (const [id, choix] of etat.choixEnCours) {
+    sur.delete(id);
+    probable.delete(id);
+    if (choix.statut) (choix.statut === 'sur' ? sur : probable).add(id);
+  }
+  for (const id of sur) probable.delete(id);   // un événement n’est jamais dans les deux listes
+  return { sur: [...sur], probable: [...probable] };
+}
+
+/** Écrit mes deux listes sur ma ligne de l’Annuaire (une seule écriture, donc jamais de doublon). */
+async function ecrireMesListes() {
+  const c = CONFIG.annuaire;
+  const { sur, probable } = mesListes();
+  await grist.docApi.applyUserActions([
+    ['UpdateRecord', CONFIG.tables.annuaire, etat.moi.id, { [c.presents]: ['L', ...sur], [c.aConfirmer]: ['L', ...probable] }],
+  ]);
+}
+
+// Les écritures partent l’une après l’autre : chacune renvoie mes listes complètes, la dernière a donc raison.
+let fileEcritures = Promise.resolve();
+function enfiler(tache) {
+  const suite = fileEcritures.then(tache);
+  fileEcritures = suite.catch(() => {});
+  return suite;
+}
+
+/** Mes clics enregistrés disparaissent dès que l’Annuaire les reflète (ou, par sécurité, après un délai). */
+function confirmerMesChoix() {
+  for (const [id, choix] of etat.choixEnCours) {
+    if (choix.ecrit && (statutEnregistre(id) === choix.statut || Date.now() - choix.quand > 15000)) etat.choixEnCours.delete(id);
   }
 }
 
@@ -342,16 +427,19 @@ async function choisir(evenementId, valeur) {
   if (!etat.moi || etat.verrous.has(evenementId)) return;
   const cible = !valeur || valeur === monStatut(evenementId) ? null : valeur;
   etat.verrous.add(evenementId);
-  etat.choixEnCours.set(evenementId, { statut: cible, ecrit: false });
+  etat.choixEnCours.set(evenementId, { statut: cible, ecrit: false, quand: 0 });
   rendre();
   try {
-    await ecrirePresence(evenementId, cible);
+    await enfiler(ecrireMesListes);
     const choix = etat.choixEnCours.get(evenementId);
-    if (choix) choix.ecrit = true;
+    if (choix) Object.assign(choix, { ecrit: true, quand: Date.now() });
+    await chargerAnnuaire();   // relecture immédiate : la confirmation n’attend pas le prochain passage
   } catch (err) {
     console.error(err);
     etat.choixEnCours.delete(evenementId);
-    alerter('Votre choix n’a pas pu être enregistré. Réessayez dans un instant.');
+    alerter(/access|denied|blocked|permission/i.test(String(err && err.message))
+      ? 'Votre choix a été refusé par les règles d’accès du document. Contactez l’administrateur.'
+      : 'Votre choix n’a pas pu être enregistré. Réessayez dans un instant.');
   }
   etat.verrous.delete(evenementId);
   rendre();
@@ -436,7 +524,7 @@ function rendreDetail(evenement) {
 }
 
 function rendreActions(evenement) {
-  if (!etat.moi) return '';   // personne non reconnue : lecture seule, un message l’explique en haut de page
+  if (!etat.moi || etat.erreurColonnes) return '';   // personne non reconnue ou colonnes absentes : lecture seule, un message l’explique en haut de page
   const mien = monStatut(evenement.id);
   const bloque = etat.verrous.has(evenement.id);
   const bouton = (valeur, libelle) => `
@@ -482,7 +570,7 @@ function rendreEntete() {
   }
   const nb = etat.evenements.filter((e) => monStatut(e.id)).length;
   const filtre = el('filtre');
-  filtre.hidden = !etat.moi;
+  filtre.hidden = !etat.moi || Boolean(etat.erreurColonnes);
   filtre.setAttribute('aria-pressed', String(etat.seulementMesEvenements));
   filtre.textContent = `Mon programme${nb ? ` (${nb})` : ''}`;
 }
@@ -515,6 +603,7 @@ function rendrePlanning(jours) {
 }
 
 function rendre() {
+  if (!etat.pret) return;   // le premier affichage attend la fin du premier chargement
   if (etat.erreurColonnes) afficherMessage(etat.erreurColonnes, true);
   else if (etat.erreur) afficherMessage(etat.erreur, true);
   else if (!etat.moi && etat.messageMoi) afficherMessage(etat.messageMoi);
@@ -578,12 +667,13 @@ if (typeof grist === 'undefined' || (window.self === window.top && !grist.simule
   afficherMessage('Ce widget s’utilise dans Grist : ajoutez-le à une page via « Ajouter un widget > Personnalisé ».', true);
 } else {
   grist.ready({ requiredAccess: 'full' });
-  grist.onRecords(recevoirPresences, { includeColumns: 'all' });
-  chargerEvenements();
-  chargerMoi();
-  verifierColonnes();
-  setInterval(() => {
-    chargerEvenements();
-    if (!etat.moi) chargerMoi();
-  }, CONFIG.rafraichissementMs);
+  (async () => {
+    await Promise.all([chargerEvenements(), chargerEtablissements()]);
+    await chargerAnnuaire();
+    etat.pret = true;
+    rendre();
+    setInterval(() => { if (!document.hidden) chargerAnnuaire(); }, CONFIG.directMs);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) chargerAnnuaire(); });
+    setInterval(() => { chargerEvenements(); chargerEtablissements(); }, CONFIG.rafraichissementMs);
+  })();
 }
