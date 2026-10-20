@@ -135,6 +135,9 @@ describe('événements', () => {
   test('lireCibles : liste de choix, tableau ou texte ; accents et casse ignorés, valeurs inconnues écartées, ordre des pastilles', async () => {
     assert.deepEqual(await f('lireCibles', ['L', 'Recherche', 'Pédagogie']), ['pedagogie', 'recherche']);
     assert.deepEqual(await f('lireCibles', ['étudiants', 'Entreprises']), ['etudiants', 'entreprises']);
+    assert.deepEqual(await f('lireCibles', ['L', 'Personnels', 'Étudiants']), ['etudiants', 'personnels']);
+    assert.deepEqual(await f('lireCibles', 'personnel, Recherche'), ['recherche', 'personnels']);
+    assert.deepEqual(await f('lireCibles', ['L', 'Personnes']), []);
     assert.deepEqual(await f('lireCibles', 'pedagogie, ETUDIANTS ; Acteurs socio-économiques'), ['pedagogie', 'etudiants', 'entreprises']);
     assert.deepEqual(await f('lireCibles', ['L', 'Grand public', 'Recherche']), ['recherche']);
     for (const vide of [null, undefined, '', ['C'], ['L'], 12]) assert.deepEqual(await f('lireCibles', vide), []);

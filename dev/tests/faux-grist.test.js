@@ -147,7 +147,7 @@ describe('publics visés (Pour qui ?)', () => {
 
   test('une bulle par public au-dessus des jours, aucune cochée au départ, rien de changé sur les fiches', async () => {
     const page = await ouvrir();
-    assert.deepEqual(await page.locator('.bulle').allInnerTexts(), ['Pédagogie', 'Recherche', 'Étudiants', 'Entreprises']);
+    assert.deepEqual(await page.locator('.bulle').allInnerTexts(), ['Pédagogie', 'Recherche', 'Étudiants', 'Entreprises', 'Personnels']);
     assert.equal(await page.locator('.bulle[aria-pressed="true"]').count(), 0);
     assert.equal(await page.locator(SEL.evenement).count(), 30);
     assert.equal(await page.locator(`${SEL.evenement} .cible, ${SEL.evenement} .bulle`).count(), 0, 'les fiches ne montrent aucun public');
@@ -168,13 +168,51 @@ describe('publics visés (Pour qui ?)', () => {
     aucuneErreur(page);
   });
 
-  test('la conférence ouverte aux quatre publics reste, l\'événement sans public disparaît dès qu\'on filtre', async () => {
+  test('la conférence ouverte aux quatre publics reste, l\'événement réservé aux personnels disparaît dès qu\'on filtre un autre public', async () => {
     const page = await ouvrir();
     assert.equal(await carte(page, 'No wrong door').count(), 1);
     await bulle(page, 'entreprises').click();
     assert.equal(await carte(page, 'L’IA au service des patients').count(), 1);
     assert.equal(await carte(page, 'No wrong door').count(), 0);
     assert.equal(await page.locator(SEL.evenement).count(), 13);
+  });
+
+  test('Personnels : une seule séance (le serious game), qui s\'additionne aux autres publics, sans toucher à leurs comptes', async () => {
+    const page = await ouvrir();
+    await bulle(page, 'personnels').click();
+    const affiches = await titres(page);
+    assert.equal(affiches.length, 1);
+    assert.match(affiches[0], /^Serious game .*No wrong door.* avec le Pôle universitaire d’innovation Bordeaux$/);
+    assert.match(await page.locator('#cibles-nb').innerText(), /^1 événement sur 30$/);
+    assert.equal(await bulle(page, 'personnels').getAttribute('aria-pressed'), 'true');
+    await bulle(page, 'etudiants').click();
+    assert.equal(await page.locator(SEL.evenement).count(), 8);   // 7 étudiants + le serious game
+    await bulle(page, 'personnels').click();
+    assert.equal(await page.locator(SEL.evenement).count(), 7);
+    for (const [code, attendu] of [['pedagogie', 13], ['recherche', 16], ['entreprises', 13]]) {
+      await page.reload();
+      await page.waitForSelector(SEL.evenement);
+      await page.evaluate(() => localStorage.clear());
+      await page.reload();
+      await page.waitForSelector(SEL.evenement);
+      await bulle(page, code).click();
+      assert.equal(await page.locator(SEL.evenement).count(), attendu, code);
+    }
+    aucuneErreur(page);
+  });
+
+  test('aucune séance « Personnels » dans la colonne : la rangée garde ses quatre bulles et le serious game n\'est plus rattaché à un public', async () => {
+    const page = await ouvrir({ requete: '?sans-personnels' });
+    assert.deepEqual(await page.locator('.bulle').allInnerTexts(), ['Pédagogie', 'Recherche', 'Étudiants', 'Entreprises']);
+    assert.equal(await bulle(page, 'personnels').count(), 0);
+    assert.equal(await page.locator(SEL.evenement).count(), 30);
+    await bulle(page, 'etudiants').click();
+    assert.equal(await page.locator(SEL.evenement).count(), 7);
+    await page.evaluate(() => localStorage.setItem('semaine-innovation-2026:cibles', JSON.stringify(['personnels'])));
+    await page.reload();
+    await page.waitForSelector(SEL.evenement);
+    assert.equal(await page.locator(SEL.evenement).count(), 30, 'un choix mémorisé pour une bulle absente est ignoré');
+    aucuneErreur(page);
   });
 
   test('jour sans événement pour ce public : un message, et « Mon programme » se combine au filtre', async () => {
@@ -210,7 +248,7 @@ describe('publics visés (Pour qui ?)', () => {
   test('petit mobile : les bulles tiennent sans défilement horizontal de la page', async () => {
     const page = await ouvrir({ largeur: 320, hauteur: 640 });
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
-    assert.equal(await page.locator('.bulle:visible').count(), 4);
+    assert.equal(await page.locator('.bulle:visible').count(), 5);
   });
 });
 

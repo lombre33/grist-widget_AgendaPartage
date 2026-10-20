@@ -593,7 +593,10 @@ window.MOCK_EVENEMENTS = [
   "Ville": "Talence",
   "Adresse": "Bâtiment A31, 351 cours de la Libération, 33400 Talence",
   "Public": "Personnels administratifs",
-  "Cibles": null,
+  "Cibles": [
+   "L",
+   "Personnels"
+  ],
   "Description": "Jeu en équipes de 4 à 5 personnes pour tester sa connaissance de l’écosystème d’innovation bordelais et savoir orienter les porteurs de projets.",
   "Lien": "https://www.u-bordeaux.fr/evenements/le-pole-universitaire-dinnovation-bordeaux-en-jeu-venez-relever-le-defi"
  },

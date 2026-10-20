@@ -124,7 +124,7 @@ describe('vrai Grist', { skip: disponible ? false : `Grist ne répond pas sur ${
     test('la colonne est lue, une bulle par public, le filtre garde les bons événements et le choix reste au rechargement', async () => {
       const doc = await nouveau();
       const { page, widget } = await ouvrir(PROPRIO, doc);
-      assert.deepEqual(await widget.locator('.bulle').allInnerTexts(), ['Pédagogie', 'Recherche', 'Étudiants', 'Entreprises']);
+      assert.deepEqual(await widget.locator('.bulle').allInnerTexts(), ['Pédagogie', 'Recherche', 'Étudiants', 'Entreprises', 'Personnels']);
       await widget.locator('[data-cible="etudiants"]').evaluate((b) => b.click());   // le voile d'accueil de Grist peut intercepter un vrai clic
       assert.equal(await widget.locator(SEL.evenement).count(), 7);
       assert.equal(await carte(widget, 'Atelier Durable').count(), 1);
@@ -134,6 +134,22 @@ describe('vrai Grist', { skip: disponible ? false : `Grist ne répond pas sur ${
       await widget2.waitForSelector(SEL.evenement, { timeout: 30000 });
       assert.equal(await widget2.locator('[data-cible="etudiants"]').getAttribute('aria-pressed'), 'true');
       assert.equal(await widget2.locator(SEL.evenement).count(), 7);
+      assert.deepEqual(page.erreurs, []);
+    });
+
+    test('Personnels : le serious game seul, y compris quand la valeur est hors de la liste de choix de la colonne ; les autres publics gardent leurs comptes', async () => {
+      const doc = await nouveau({ choixCibles: ['Pédagogie', 'Recherche', 'Étudiants', 'Entreprises'] });
+      const { page, widget } = await ouvrir(PROPRIO, doc);
+      await widget.locator('[data-cible="personnels"]').evaluate((b) => b.click());
+      assert.equal(await widget.locator(SEL.evenement).count(), 1);
+      assert.equal(await carte(widget, 'No wrong door').count(), 1);
+      await widget.locator('[data-cible="personnels"]').evaluate((b) => b.click());
+      for (const [code, attendu] of [['pedagogie', 13], ['recherche', 16], ['etudiants', 7], ['entreprises', 13]]) {
+        await widget.locator(`[data-cible="${code}"]`).evaluate((b) => b.click());
+        assert.equal(await widget.locator(SEL.evenement).count(), attendu, code);
+        await widget.locator(`[data-cible="${code}"]`).evaluate((b) => b.click());
+      }
+      assert.equal(await widget.locator(SEL.evenement).count(), 30);
       assert.deepEqual(page.erreurs, []);
     });
 

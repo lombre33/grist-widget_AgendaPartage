@@ -64,17 +64,19 @@ const LIBELLES = {
   probable: { bouton: '? À confirmer', badge: 'À confirmer', resume: ['à confirmer', 'à confirmer'] },
 };
 
-/* Publics visés : les quatre publics des plannings imprimés, saisis dans la colonne « Cibles » de Evenements (liste de choix).
-   La rangée de bulles « Pour qui ? » n’apparaît que si cette colonne existe et contient au moins une valeur. */
+/* Publics visés : les quatre publics des plannings imprimés, plus les personnels (séances qu’aucun planning ne vise), saisis dans la colonne
+   « Cibles » de Evenements (liste de choix). La rangée de bulles « Pour qui ? » n’apparaît que si cette colonne existe et contient au moins
+   une valeur, et une bulle n’apparaît que si une séance au moins la porte. */
 const CIBLES = [
   { code: 'pedagogie',   libelle: 'Pédagogie',   qui: 'enseignants-chercheurs et professionnels de la formation et de la transformation pédagogique' },
   { code: 'recherche',   libelle: 'Recherche',   qui: 'enseignants-chercheurs, chercheurs, doctorants' },
   { code: 'etudiants',   libelle: 'Étudiants',   qui: 'étudiants' },
   { code: 'entreprises', libelle: 'Entreprises', qui: 'acteurs socio-économiques' },
+  { code: 'personnels',  libelle: 'Personnels',  qui: 'personnels administratifs' },
 ];
 
 /* Numéro de version, affiché en bas de page : il permet de vérifier quelle version Grist a chargée (cache du navigateur). */
-const VERSION = '2026-10-20 · k';
+const VERSION = '2026-10-20 · l';
 
 const JOURS_SEMAINE = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
 const MOIS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
@@ -141,6 +143,7 @@ function codeCible(v) {
   if (/^recherch/.test(s)) return 'recherche';
   if (/^etudiant/.test(s)) return 'etudiants';
   if (/^(entreprise|acteurs? socio)/.test(s)) return 'entreprises';
+  if (/^personnel/.test(s)) return 'personnels';
   return null;
 }
 

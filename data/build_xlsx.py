@@ -40,8 +40,11 @@ BU_ST = "Avenue des Facultés, 33400 Talence"
 
 # Publics visés, d'après les quatre plannings par public (Pédagogie, Recherche, Étudiants, Entreprises) : une séance
 # est « pour » un public quand elle est surlignée sur son planning. Valeurs de la colonne « Cibles » (liste de choix).
+# Cinquième public, « Personnels » : la seule séance qu'aucun planning ne vise (public du site : personnels administratifs).
 PEDAGOGIE, RECHERCHE, ETUDIANTS, ENTREPRISES = "Pédagogie", "Recherche", "Étudiants", "Entreprises"
-TOUS = (PEDAGOGIE, RECHERCHE, ETUDIANTS, ENTREPRISES)
+PERSONNELS = "Personnels"
+TOUS = (PEDAGOGIE, RECHERCHE, ETUDIANTS, ENTREPRISES)   # les quatre plannings : « tous » ne comprend pas les personnels
+ORDRE = TOUS + (PERSONNELS,)
 
 # (jour, début, titre) -> publics. Une séance absente de cette table n'est surlignée sur aucun planning.
 CIBLES = {
@@ -74,14 +77,15 @@ CIBLES = {
     (VEN, "09:00", "CampusIABordeaux"): (PEDAGOGIE,),
     (VEN, "09:00", "Des formations sur mesure pour faire évoluer ses pratiques"): (PEDAGOGIE, RECHERCHE),
     (VEN, "11:30", "CampusIABordeaux"): (PEDAGOGIE,),
-    # Vendredi 11 h, Serious game « No wrong door » : surligné sur aucun des quatre plannings (public : personnels administratifs).
+    # Surligné sur aucun des quatre plannings ; public du site : personnels administratifs.
+    (VEN, "11:00", "Serious game « No wrong door » avec le Pôle universitaire d’innovation Bordeaux"): (PERSONNELS,),
 }
 
 
 def cibles_de(jour, debut, titre):
-    """Publics d'une séance, dans l'ordre Pédagogie, Recherche, Étudiants, Entreprises, séparés par des virgules."""
+    """Publics d'une séance, dans l'ordre Pédagogie, Recherche, Étudiants, Entreprises, Personnels, séparés par des virgules."""
     publics = CIBLES.get((jour, debut, titre), ())
-    return ", ".join(c for c in TOUS if c in publics)
+    return ", ".join(c for c in ORDRE if c in publics)
 
 
 # (jour, début, fin, titre, sous-titre, type, temps fort, lieu, ville, adresse, public, description, fiche)

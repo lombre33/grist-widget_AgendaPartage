@@ -21,6 +21,7 @@
                     ?doublons       deux lignes à mon nom pour l'événement 3 (« à confirmer » et « présent »)
                     ?orphelines     deux lignes de connexion restées dans Participations (la sienne et celle d'une autre personne)
                     ?sans-cibles    la table Evenements n'a pas la colonne Cibles (le filtre « Pour qui ? » n'apparaît pas)
+                    ?sans-personnels  la colonne Cibles ne contient que les quatre publics des plannings (aucune séance « Personnels »)
                     ?vide           démarrer sans aucune présence
                     ?foule          60 personnes de plus inscrites à l'événement 3 (liste longue, groupée par établissement)
 
@@ -138,6 +139,7 @@
         if (nom === 'Evenements') {
           const t = enColonnes(window.MOCK_EVENEMENTS);
           if (params.has('sans-cibles')) delete t.Cibles;
+          if (params.has('sans-personnels')) t.Cibles = t.Cibles.map((v) => { const l = (v || []).slice(1).filter((x) => x !== 'Personnels'); return l.length ? ['L', ...l] : null; });
           return t;
         }
         if (nom === 'Annuaire') return enColonnes(annuaireVisible(), ['id', 'prenom', 'nom', 'email', 'Etablissement', 'nom_de_domaine']);

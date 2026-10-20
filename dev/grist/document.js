@@ -40,11 +40,15 @@ function evenements() {
   return evenementsLus;
 }
 
-/** Les quatre publics de la colonne « Cibles » (liste de choix) de la table Evenements. */
-const CHOIX_CIBLES = ['Pédagogie', 'Recherche', 'Étudiants', 'Entreprises'];
+/** Les publics de la colonne « Cibles » (liste de choix) de la table Evenements : les quatre plannings, plus les personnels. */
+const CHOIX_CIBLES = ['Pédagogie', 'Recherche', 'Étudiants', 'Entreprises', 'Personnels'];
 
-/** `cibles: false` : une table Evenements sans la colonne « Cibles », comme avant son ajout. */
-async function creerDocument(nom = 'Semaine de l’innovation (test)', { widget = WIDGET, acces = 'full', cibles = true } = {}) {
+/**
+ * `cibles: false` : une table Evenements sans la colonne « Cibles », comme avant son ajout.
+ * `choixCibles` : les choix déclarés dans la colonne (par exemple les quatre premiers seulement : les valeurs « Personnels » collées
+ * depuis le tableur restent alors dans les cellules, hors liste de choix).
+ */
+async function creerDocument(nom = 'Semaine de l’innovation (test)', { widget = WIDGET, acces = 'full', cibles = true, choixCibles = CHOIX_CIBLES } = {}) {
   const [{ id: espace }] = await api(PROPRIETAIRE, 'GET', '/orgs/current/workspaces');
   const doc = await api(PROPRIETAIRE, 'POST', `/workspaces/${espace}/docs`, { name: nom });
   const liste = evenements();
@@ -53,7 +57,7 @@ async function creerDocument(nom = 'Semaine de l’innovation (test)', { widget 
     ['AddTable', 'Annuaire', colonnes(['nom', 'prenom', 'Etablissement', 'email', 'Fonction', 'nom_de_domaine', 'email_affiche'])],
     ['AddTable', 'Etablissement', [...colonnes(['Nom_complet', 'Acronyme', 'nom_de_domaine']), { id: 'Logo', type: 'Attachments', isFormula: false }]],
     ['AddTable', 'Evenements', [{ id: 'Jour', type: 'Date', isFormula: false }, ...colonnes(cles),
-      ...(cibles ? [{ id: 'Cibles', type: 'ChoiceList', isFormula: false, widgetOptions: JSON.stringify({ choices: CHOIX_CIBLES }) }] : [])]],
+      ...(cibles ? [{ id: 'Cibles', type: 'ChoiceList', isFormula: false, widgetOptions: JSON.stringify({ choices: choixCibles }) }] : [])]],
     // Comme dans le vrai document : une table neuve, avec ses trois colonnes A, B, C par défaut
     ['AddTable', 'Participations', ['A', 'B', 'C'].map((id) => ({ id, type: 'Any', isFormula: true, formula: '' }))],
   ]);
