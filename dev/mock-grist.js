@@ -1,23 +1,24 @@
 /* Faux Grist pour tester le widget dans un simple navigateur (voir dev/index.html).
    Il imite uniquement la partie de grist-plugin-api.js utilisée par widget.js,
-   avec la même structure de tables que le document Grist (Annuaire, Etablissement, Evenements).
-   Les présences sont dans l'Annuaire, comme dans le vrai document : deux colonnes « liste de références ».
+   avec la même structure de tables que le document Grist (Annuaire, Etablissement, Evenements, Participations).
+   Les présences sont dans Participations (une ligne par présence) et arrivent en direct, comme dans Grist.
    Ne sert qu'au développement : il n'est jamais chargé par index.html.
 
    Options d'URL :  ?moi=2          se connecter comme la personne n° 2 (1 par défaut)
                     ?restreint      l'Annuaire ne montre que sa propre ligne (au lieu de masquer les e-mails des autres)
-                    ?ambigu         tous les e-mails de l'Annuaire sont lisibles : personne n'est reconnu
+                    ?ambigu         tous les e-mails de l'Annuaire sont lisibles (cas réel) : la connexion seule doit suffire
                     ?anonyme        personne non connectée à Grist (e-mail de connexion vide, aucun e-mail lisible)
                     ?inconnu        connecté avec une adresse absente de l'Annuaire
                     ?sans-declencheur  la formule « à la création » (user.Email) ne donne rien : le widget se rabat sur l'e-mail lisible
-                    ?declencheur-casse  les colonnes de Participations existent déjà mais ont été créées avec recalcWhen 1 (jamais calculées) : le widget doit les recréer
+                    ?declencheur-casse  Email et Utilisateur existent déjà mais ont été créées avec recalcWhen 1 (jamais calculées) : le widget doit les recréer
                     ?sans-ajout     les règles d'accès interdisent d'ajouter une ligne dans Participations
-                    ?sans-colonnes  l'Annuaire n'a pas encore les colonnes de présence : le widget doit les créer
+                    ?sans-colonnes  Participations n'a pas encore ses colonnes : le widget doit les créer
                     ?sans-droits    ... mais la structure du document n'est pas modifiable par cette personne
-                    ?ecriture-refusee  les règles d'accès refusent toute modification de l'Annuaire
+                    ?ecriture-refusee  les règles d'accès refusent d'enregistrer, modifier ou supprimer une présence
                     ?vide           démarrer sans aucune présence
 
-   Pour les tests : window.MOCK_ACTIONS liste les lots d'actions reçus par applyUserActions. */
+   Pour les tests : window.MOCK_ACTIONS liste les lots d'actions reçus par applyUserActions. Toute action sur
+   l'Annuaire est refusée : le widget ne doit pas y écrire (l'attribut utilisateur « acl » recharge le document). */
 (function () {
   const params = new URLSearchParams(location.search);
 
@@ -50,50 +51,39 @@
   const moiId = Number(params.get('moi')) || 1;
   const parId = (id) => ANNUAIRE.find((p) => p.id === id);
 
-  // --- Présences : deux colonnes de l'Annuaire (listes d'identifiants d'événements) --------------
-  const COL_SUR = 'Evenements_presents';
-  const COL_PROBABLE = 'Evenements_a_confirmer';
-  const colonnes = params.has('sans-colonnes') ? [] : [COL_SUR, COL_PROBABLE];
-  const listes = new Map();   // identifiant de personne -> { sur: [...], probable: [...] }
-  const listesDe = (id) => { if (!listes.has(id)) listes.set(id, { sur: [], probable: [] }); return listes.get(id); };
-  const retirerEvt = (id, evt) => { const l = listesDe(id); l.sur = l.sur.filter((x) => x !== evt); l.probable = l.probable.filter((x) => x !== evt); };
-  const ajouterEvt = (id, evt, statut) => { retirerEvt(id, evt); listesDe(id)[statut].push(evt); };
-  if (!params.has('vide') && !params.has('sans-colonnes')) {
-    // [événement, personne, statut]
-    const demo = [[1, 3, 'sur'], [1, 4, 'probable'], [2, 5, 'sur'], [5, 2, 'sur'], [5, 6, 'sur'], [5, 7, 'probable'], [5, 8, 'sur'], [5, 3, 'probable'],
-      [7, 5, 'sur'], [9, 1, 'sur'], [9, 5, 'sur'], [9, 8, 'sur'], [9, 4, 'probable'], [9, 6, 'sur'], [9, 7, 'sur'], [17, 6, 'sur'], [19, 2, 'probable'],
-      [19, 5, 'sur'], [21, 3, 'sur'], [22, 8, 'sur'], [26, 4, 'sur'], [26, 6, 'sur'], [26, 7, 'sur'], [26, 3, 'sur'], [26, 8, 'probable'],
-      [7, moiId, 'probable']];
-    demo.forEach(([e, p, s]) => ajouterEvt(p, e, s));
-  }
-  // Ce que renvoie Grist : liste encodée ['L', ...] ou, quand elle est vide, null (les deux formes sont lues par le widget)
-  const enListe = (ids, id) => (ids.length ? (id % 2 ? ['L', ...ids] : [...ids]) : null);
-
-  // --- Participations : table vide qui sert de support au widget (colonnes A, B, C par défaut) -----
+  // --- Participations : une ligne par présence + les lignes de connexion éphémères du widget -------
   const emailConnecte = params.has('anonyme') ? '' : params.has('inconnu') ? 'quelquun@exemple.org' : parId(moiId).email;
-  const colonnesParticipations = ['A', 'B', 'C'];
+  const tout = !params.has('sans-colonnes') && !params.has('declencheur-casse');
+  const colonnesParticipations = ['A', 'B', 'C'];   // colonnes par défaut d'une table Grist neuve
   const infosColonnes = {};
-  if (params.has('declencheur-casse')) {   // état du vrai document après la première version : recalcWhen 1 = jamais calculée à la création
+  if (tout) {
+    colonnesParticipations.push('Email', 'Utilisateur', 'Evenement', 'Statut');
+    infosColonnes.Email = { recalcWhen: 0 };
+  } else if (params.has('declencheur-casse')) {   // état du vrai document après la première version : recalcWhen 1 = jamais calculée à la création
     colonnesParticipations.push('Email', 'Utilisateur');
     infosColonnes.Email = { recalcWhen: 1 };
-    infosColonnes.Utilisateur = {};
   }
   let participations = [];
   let prochaineParticipation = 1;
   // Formule « Utilisateur » : la personne de l'Annuaire qui a l'e-mail de connexion
   const personneDe = (mail) => (ANNUAIRE.find((p) => mail && p.email.toLowerCase() === mail.toLowerCase()) || { id: 0 }).id;
+  const ajouterPresence = (personneId, evenement, statut) =>
+    participations.push({ id: prochaineParticipation++, Email: parId(personneId).email, Utilisateur: personneId, Evenement: evenement, Statut: statut });
+  if (tout && !params.has('vide')) {
+    // [événement, personne, statut] : « sûr » et « probable » (anciennes valeurs) restent lus
+    const demo = [[1, 3, 'sûr'], [1, 4, 'probable'], [2, 5, 'présent'], [5, 2, 'présent'], [5, 6, 'présent'], [5, 7, 'à confirmer'], [5, 8, 'présent'], [5, 3, 'à confirmer'],
+      [7, 5, 'présent'], [9, 1, 'présent'], [9, 5, 'présent'], [9, 8, 'présent'], [9, 4, 'à confirmer'], [9, 6, 'présent'], [9, 7, 'présent'], [17, 6, 'présent'], [19, 2, 'à confirmer'],
+      [19, 5, 'présent'], [21, 3, 'présent'], [22, 8, 'présent'], [26, 4, 'présent'], [26, 6, 'présent'], [26, 7, 'présent'], [26, 3, 'présent'], [26, 8, 'à confirmer'],
+      [7, moiId, 'à confirmer']];
+    demo.forEach(([e, p, st]) => ajouterPresence(p, e, st));
+  }
 
   // --- Ce que Grist renvoie pour l'Annuaire selon les règles d'accès --------------------------
   function annuaireVisible() {
-    const avecPresences = (p) => ({
-      ...p,
-      ...(colonnes.includes(COL_SUR) ? { [COL_SUR]: enListe(listesDe(p.id).sur, p.id) } : {}),
-      ...(colonnes.includes(COL_PROBABLE) ? { [COL_PROBABLE]: enListe(listesDe(p.id).probable, p.id) } : {}),
-    });
-    if (params.has('restreint')) return [avecPresences(parId(moiId))];
+    if (params.has('restreint')) return [parId(moiId)];
     return ANNUAIRE.map((p) => {
       const lisible = params.has('ambigu') || (p.id === moiId && !params.has('anonyme'));
-      return avecPresences(lisible ? p : { ...p, email: ['C'] });   // ['C'] : cellule masquée par les règles d'accès
+      return lisible ? p : { ...p, email: ['C'] };   // ['C'] : cellule masquée par les règles d'accès
     });
   }
 
@@ -103,17 +93,25 @@
     Object.fromEntries(cols.map((c) => [c, lignes.map((l) => l[c])]));
   window.MOCK_ACTIONS = [];
   window.MOCK_COLONNES = infosColonnes;   // définitions des colonnes créées dans Participations
+  let rappel = null;
+  const notifier = () => setTimeout(() => rappel && rappel(participations.map((l) => ({ ...l })), null), 120);
+  const estMienne = (ligne) => (ligne.Email || '').toLowerCase() === emailConnecte.toLowerCase();
 
   window.grist = {
     simule: true,
     ready(options) {
       console.info('[faux Grist] ready', options);
+      notifier();
+    },
+    onRecords(cb, options) {
+      console.info('[faux Grist] onRecords', options);
+      rappel = cb;
     },
     docApi: {
       async fetchTable(nom) {
         await attendre(40);
         if (nom === 'Evenements') return enColonnes(window.MOCK_EVENEMENTS);
-        if (nom === 'Annuaire') return enColonnes(annuaireVisible(), ['id', 'prenom', 'nom', 'email', 'Etablissement', 'nom_de_domaine', ...colonnes]);
+        if (nom === 'Annuaire') return enColonnes(annuaireVisible(), ['id', 'prenom', 'nom', 'email', 'Etablissement', 'nom_de_domaine']);
         if (nom === 'Etablissement') return enColonnes(ETABLISSEMENTS);
         if (nom === 'Participations') return enColonnes(participations, ['id', ...colonnesParticipations]);
         throw new Error(`Table inconnue : ${nom}`);
@@ -124,40 +122,39 @@
         const retValues = [];
         for (const [type, table, ...args] of actions) {
           retValues.push(null);
+          if (table === 'Annuaire') throw new Error('Le widget ne doit pas écrire dans l’Annuaire (attribut utilisateur : rechargement du document)');
+          if (table !== 'Participations') throw new Error(`Table inconnue : ${table}`);
           if ((type === 'AddColumn' || type === 'RemoveColumn') && params.has('sans-droits')) throw new Error('Blocked by table structure access rules');
-          if (table === 'Participations') {
-            if (type === 'AddColumn') {
-              colonnesParticipations.push(args[0]);
-              infosColonnes[args[0]] = args[1];
-            } else if (type === 'RemoveColumn') {
-              colonnesParticipations.splice(colonnesParticipations.indexOf(args[0]), 1);
-              delete infosColonnes[args[0]];
-            } else if (type === 'AddRecord') {
-              if (params.has('sans-ajout')) throw new Error('Blocked by table create access rules');
-              // comme Grist : une colonne « recalcWhen 1 » n'est pas calculée à la création de la ligne
-              const declenche = !params.has('sans-declencheur') && colonnesParticipations.includes('Email') && (infosColonnes.Email || {}).recalcWhen !== 1;
-              const email = declenche ? emailConnecte : '';
-              const ligne = { id: prochaineParticipation++, Email: email, Utilisateur: personneDe(email) };
-              participations.push(ligne);
-              retValues[retValues.length - 1] = ligne.id;
-            } else if (type === 'RemoveRecord') {
-              participations = participations.filter((l) => l.id !== args[0]);
-            } else {
-              throw new Error(`Action inconnue : ${type}`);
-            }
-            continue;
-          }
-          if (table !== 'Annuaire') throw new Error(`Table inconnue : ${table}`);
           if (type === 'AddColumn') {
-            if (!colonnes.includes(args[0])) colonnes.push(args[0]);
+            colonnesParticipations.push(args[0]);
+            infosColonnes[args[0]] = args[1];
+          } else if (type === 'RemoveColumn') {
+            colonnesParticipations.splice(colonnesParticipations.indexOf(args[0]), 1);
+            delete infosColonnes[args[0]];
+            participations.forEach((l) => delete l[args[0]]);
+          } else if (type === 'AddRecord') {
+            const valeurs = args[1] || {};
+            if (params.has('sans-ajout') || (params.has('ecriture-refusee') && 'Evenement' in valeurs)) throw new Error('Blocked by table create access rules');
+            for (const col of Object.keys(valeurs)) if (!colonnesParticipations.includes(col)) throw new Error(`Colonne inconnue : ${col}`);
+            // comme Grist : une colonne « recalcWhen 1 » n'est pas calculée à la création de la ligne
+            const declenche = !params.has('sans-declencheur') && colonnesParticipations.includes('Email') && (infosColonnes.Email || {}).recalcWhen !== 1;
+            const email = declenche ? emailConnecte : '';
+            const ligne = { id: prochaineParticipation++, Email: email, Utilisateur: personneDe(email), ...valeurs };
+            participations.push(ligne);
+            retValues[retValues.length - 1] = ligne.id;
+            notifier();
           } else if (type === 'UpdateRecord') {
             const [id, champs] = args;
-            if (params.has('ecriture-refusee') || id !== moiId) throw new Error('Blocked by table update access rules');
-            for (const [col, valeur] of Object.entries(champs)) {
-              if (!colonnes.includes(col)) throw new Error(`Colonne inconnue : ${col}`);
-              const ids = (Array.isArray(valeur) ? valeur.filter((x) => x !== 'L') : []);
-              listesDe(id)[col === COL_SUR ? 'sur' : 'probable'] = ids;
-            }
+            const ligne = participations.find((l) => l.id === id);
+            if (params.has('ecriture-refusee') || !ligne || !estMienne(ligne)) throw new Error('Blocked by table update access rules');
+            Object.assign(ligne, champs);
+            notifier();
+          } else if (type === 'BulkRemoveRecord' || type === 'RemoveRecord') {
+            const ids = [].concat(args[0]);
+            const lignes = participations.filter((l) => ids.includes(l.id));
+            if (type === 'BulkRemoveRecord' && (params.has('ecriture-refusee') || lignes.some((l) => !estMienne(l)))) throw new Error('Blocked by table delete access rules');
+            participations = participations.filter((l) => !ids.includes(l.id));
+            notifier();
           } else {
             throw new Error(`Action inconnue : ${type}`);
           }
@@ -172,18 +169,18 @@
   window.addEventListener('DOMContentLoaded', () => {
     const barre = document.createElement('div');
     barre.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:20;display:flex;gap:8px;align-items:center;padding:6px 12px;background:#222;color:#fff;font:12px Arial';
-    barre.innerHTML = '<span>Faux Grist</span><button id="simuler" style="font:inherit">Un autre participant bouge</button><span id="simuler-info" style="opacity:.7">(visible dans les 5 s)</span>';
+    barre.innerHTML = '<span>Faux Grist</span><button id="simuler" style="font:inherit">Un autre participant bouge</button><span id="simuler-info" style="opacity:.7"></span>';
     document.body.appendChild(barre);
     document.body.style.paddingBottom = '56px';
     document.getElementById('simuler').addEventListener('click', () => {
       const autres = ANNUAIRE.filter((p) => p.id !== moiId);
       const p = autres[Math.floor(Math.random() * autres.length)];
       const evt = 1 + Math.floor(Math.random() * window.MOCK_EVENEMENTS.length);
-      const l = listesDe(p.id);
-      const existante = l.sur.includes(evt) || l.probable.includes(evt);
-      if (existante) retirerEvt(p.id, evt);
-      else ajouterEvt(p.id, evt, Math.random() < 0.6 ? 'sur' : 'probable');
+      const existante = participations.find((l) => l.Evenement === evt && l.Utilisateur === p.id);
+      if (existante) participations = participations.filter((l) => l !== existante);
+      else ajouterPresence(p.id, evt, Math.random() < 0.6 ? 'présent' : 'à confirmer');
       document.getElementById('simuler-info').textContent = `${p.prenom} ${existante ? 'se retire de' : 'ajoute'} l’événement ${evt}`;
+      notifier();
     });
   });
 })();

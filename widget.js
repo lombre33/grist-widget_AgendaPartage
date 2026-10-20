@@ -5,14 +5,12 @@
    Aucune dépendance autre que grist-plugin-api.js.
 
    Tables Grist utilisées :
-   - Evenements    : import de l’Excel fourni (data/Evenements_Semaine_Innovation_2026.xlsx)
-   - Annuaire      : une ligne par personne (nom, prénom, e-mail, établissement) ; les présences
-                     y sont enregistrées, dans deux colonnes que le widget crée lui-même
-                     à la première ouverture (CONFIG.annuaire.presents et .aConfirmer)
-   - Etablissement : le logo de chaque établissement
-   - Participations : la table à laquelle le widget est lié ; elle ne contient aucune donnée durable :
-                     le widget y crée une ligne le temps de savoir qui est connecté (voir identifierParConnexion)
-   Le widget lit les autres tables avec docApi et n’a rien à associer dans son panneau.
+   - Evenements     : import de l’Excel fourni (data/Evenements_Semaine_Innovation_2026.xlsx)
+   - Annuaire       : une ligne par personne (nom, prénom, e-mail, établissement), en lecture seule ;
+                      elle ne doit surtout pas recevoir les présences (voir README : attribut utilisateur)
+   - Etablissement  : le logo de chaque établissement
+   - Participations : la table à laquelle le widget est lié, une ligne par présence. Le widget y crée
+                      lui-même ses colonnes à la première ouverture ; les présences lui arrivent en direct.
    ============================================================================ */
 
 /* ----------------------------------------------------------------------------
@@ -30,13 +28,16 @@ const CONFIG = {
     type: 'Type', tempsFort: 'Temps_fort', lieu: 'Lieu', ville: 'Ville',
     adresse: 'Adresse', public: 'Public', description: 'Description', lien: 'Lien',
   },
-  // Table liée au widget, utilisée pour reconnaître la personne connectée (voir identifierParConnexion).
-  // Le widget y crée les deux colonnes ci-dessous, si elles n’existent pas.
-  connexion: {
+  // Table liée au widget : une ligne par présence. Le widget y crée les colonnes ci-dessous si elles manquent.
+  participations: {
     table: 'Participations',
-    email: 'Email',                      // formule « à la création » : user.Email
-    personne: 'Utilisateur',             // formule : la ligne de l’Annuaire qui a cet e-mail
+    evenement: 'Evenement',              // Référence → Evenements
+    statut: 'Statut',                    // Choix : présent / à confirmer
+    email: 'Email',                      // formule « à la création » : user.Email, l’e-mail de la personne qui coche
+    utilisateur: 'Utilisateur',          // formule : la ligne de l’Annuaire qui a cet e-mail
   },
+  // Valeurs écrites dans la colonne « Statut » (les anciennes valeurs « sûr » et « probable » sont toujours lues).
+  statuts: { sur: 'présent', probable: 'à confirmer' },
   // Colonnes de la table Annuaire.
   annuaire: {
     email: 'email',                      // rapproché de l’e-mail de connexion (voir identifierMoi)
@@ -44,9 +45,6 @@ const CONFIG = {
     prenom: 'prenom',
     domaine: 'nom_de_domaine',           // lien avec l’établissement (en priorité)
     etablissement: 'Etablissement',      // texte : lien avec l’établissement, si le domaine ne suffit pas
-    // Les présences : deux listes d’événements par personne, créées par le widget si elles n’existent pas.
-    presents: 'Evenements_presents',
-    aConfirmer: 'Evenements_a_confirmer',
   },
   // Colonnes de la table Etablissement.
   etablissements: {
@@ -54,17 +52,9 @@ const CONFIG = {
     domaine: 'nom_de_domaine',
     logo: 'Logo',                        // colonne Pièces jointes, ou lien web (https://…)
   },
-  // Grist ne prévient le widget que des changements de la table à laquelle il est lié : les présences
-  // (dans l’Annuaire) sont donc relues à cet intervalle, ce qui fait « le direct ».
-  directMs: 5000,
-  // Les événements et les logos changent rarement : on les relit à cet intervalle.
+  // Les événements, l’Annuaire et les logos changent rarement : on les relit à cet intervalle
+  // (les présences, elles, arrivent en direct).
   rafraichissementMs: 60000,
-};
-
-/* Libellés des deux colonnes créées dans l’Annuaire. */
-const ETIQUETTES_COLONNES = {
-  [CONFIG.annuaire.presents]: 'Événements : présent',
-  [CONFIG.annuaire.aConfirmer]: 'Événements : à confirmer',
 };
 
 /* Libellés affichés (les codes internes restent « sur » et « probable »). */
@@ -83,20 +73,19 @@ const etat = {
   evenements: [],              // lus dans la table Evenements
   etablissements: [],          // lignes de la table Etablissement
   logos: { parDomaine: new Map(), parNom: new Map() },   // index des logos, construit au chargement
-  annuaire: [],                // une entrée par personne : { id, nom, prenom, domaine, etablissement, email, presents, aConfirmer }
-  presences: [],               // une entrée par personne et par événement, déduite de l’annuaire
+  annuaire: [],                // une entrée par personne : { id, nom, prenom, domaine, etablissement, email }
+  lignes: [],                  // présences lues en direct dans Participations : { id, evenement, utilisateur, statut }
+  presences: [],               // ces présences, avec le nom, le prénom et le logo de la personne
+  erreurAnnuaire: '',          // l’Annuaire n’a pas pu être lu
   connexion: null,             // { email, personne } : e-mail de connexion et ligne de l’Annuaire correspondante, null si indisponible
   detailConnexion: '',         // pourquoi la reconnaissance par la connexion n’a pas abouti (affiché en cas de problème)
   moi: null,                   // { id, nom, prenom, logo } : ma ligne dans l’Annuaire
   messageMoi: '',              // pourquoi moi est vide (mode lecture seule)
-  erreurColonnes: '',          // colonnes de présence absentes de l’Annuaire et impossibles à créer
+  erreurColonnes: '',          // colonnes de Participations absentes et impossibles à créer
   erreur: '',                  // problème de lecture de la table Evenements
   pret: false,                 // vrai dès que le premier chargement est terminé
-  sequence: 0,                 // numéro de la dernière lecture de l’Annuaire (les lectures dépassées sont ignorées)
-  creationTentee: false,       // les colonnes manquantes ne sont créées qu’une fois par ouverture
-  signature: '',               // contenu de l’Annuaire à l’affichage précédent
   focus: null,                 // élément à refocaliser après un nouvel affichage
-  choixEnCours: new Map(),     // evenementId -> { statut, ecrit, quand } : mon choix jusqu’à sa confirmation par l’Annuaire
+  choixEnCours: new Map(),     // evenementId -> { statut, ecrit, quand } : mon choix jusqu’à sa confirmation par Participations
   verrous: new Set(),          // evenements dont l’écriture est en cours
   jour: null,                  // onglet affiché (écrans étroits)
   seulementMesEvenements: false,
@@ -120,6 +109,13 @@ const sansAccent = (v) => texte(v).normalize('NFD').replace(/[̀-ͯ]/g, '').toLo
 const liste = (v) => (Array.isArray(v) ? (v[0] === 'L' ? v.slice(1) : v) : []);
 
 const urlSure = (v) => (/^https?:\/\//i.test(texte(v)) ? texte(v) : '');
+
+function codeStatut(v) {
+  const s = sansAccent(v);
+  if (/^(present|sur)/.test(s)) return 'sur';
+  if (/^(a confirmer|prob)/.test(s)) return 'probable';
+  return null;
+}
 
 /** Date Grist (secondes depuis 1970, objet Date ou texte) -> 'AAAA-MM-JJ'. */
 function versIso(v) {
@@ -214,7 +210,7 @@ async function chargerEtablissements() {
     console.error('Logos des établissements indisponibles', err);
   }
   if (etat.pret) {   // les logos viennent de changer : on met à jour les avatars déjà affichés
-    appliquerAnnuaire();
+    appliquerDonnees();
     await preparerJeton(tousLesLogos());
     rendre();
   }
@@ -227,8 +223,6 @@ function trouverLogo(personne) {
   return logo ?? null;
 }
 
-const idsDeListe = (v) => liste(v).filter(Number.isInteger);
-
 /** Annuaire (colonnes-tableaux renvoyées par Grist) -> liste de personnes. */
 function lirePersonnes(table) {
   const c = CONFIG.annuaire;
@@ -239,79 +233,112 @@ function lirePersonnes(table) {
     domaine: texte(l[c.domaine]),
     etablissement: texte(l[c.etablissement]),
     email: texte(l[c.email]),
-    presents: idsDeListe(l[c.presents]),
-    aConfirmer: idsDeListe(l[c.aConfirmer]),
   }));
 }
 
-/** Formule de la colonne « Utilisateur » de la table de connexion : la personne de l’Annuaire qui a l’e-mail de connexion. */
+/** Formule de la colonne « Utilisateur » de Participations : la personne de l’Annuaire qui a l’e-mail de connexion. */
 const FORMULE_PERSONNE = [
-  `mail = ($${CONFIG.connexion.email} or "").strip().lower()`,
+  `mail = ($${CONFIG.participations.email} or "").strip().lower()`,
   `return next((p for p in ${CONFIG.tables.annuaire}.all if mail and (p.${CONFIG.annuaire.email} or "").strip().lower() == mail), None)`,
 ].join('\n');
 
 /**
- * Les deux colonnes de la table de connexion. `recalcWhen: 0` + une formule = « formule à la création » :
- * la colonne est calculée à la création de la ligne (la valeur 1 la désactiverait).
- * Avec `reparer`, les colonnes existantes sont recréées (version précédente du widget, qui les créait mal).
+ * Les colonnes de Participations. `recalcWhen: 0` + une formule = « formule à la création » : la colonne
+ * est calculée à la création de la ligne (la valeur 1 la désactiverait).
+ * Avec `reparer`, « Email » et « Utilisateur » sont recréées (une version précédente les créait mal).
  */
-async function installerColonnesConnexion(existante, reparer) {
-  const { table, email, personne } = CONFIG.connexion;
-  const actions = [];
-  if (reparer) for (const nom of [personne, email]) if (nom in existante) actions.push(['RemoveColumn', table, nom]);
-  if (reparer || !(email in existante)) {
-    actions.push(['AddColumn', table, email, { type: 'Text', isFormula: false, formula: 'user.Email', recalcWhen: 0, label: 'E-mail de connexion' }]);
-  }
-  if (reparer || !(personne in existante)) {
-    actions.push(['AddColumn', table, personne, { type: `Ref:${CONFIG.tables.annuaire}`, isFormula: true, formula: FORMULE_PERSONNE, label: 'Personne' }]);
+async function installerColonnes(existante, reparer) {
+  const c = CONFIG.participations;
+  const definitions = {
+    [c.email]: { type: 'Text', isFormula: false, formula: 'user.Email', recalcWhen: 0, label: 'E-mail de connexion' },
+    [c.utilisateur]: { type: `Ref:${CONFIG.tables.annuaire}`, isFormula: true, formula: FORMULE_PERSONNE, label: 'Personne' },
+    [c.evenement]: { type: `Ref:${CONFIG.tables.evenements}`, isFormula: false, label: 'Événement' },
+    [c.statut]: { type: 'Choice', isFormula: false, widgetOptions: JSON.stringify({ choices: Object.values(CONFIG.statuts) }), label: 'Statut' },
+  };
+  const aRecreer = reparer ? [c.email, c.utilisateur] : [];
+  const actions = aRecreer.filter((nom) => nom in existante).reverse().map((nom) => ['RemoveColumn', c.table, nom]);
+  for (const [nom, definition] of Object.entries(definitions)) {
+    if (!(nom in existante) || aRecreer.includes(nom)) actions.push(['AddColumn', c.table, nom, definition]);
   }
   if (actions.length) await grist.docApi.applyUserActions(actions);
 }
 
-/** Ajoute une ligne dans la table de connexion, lit ce que les formules y ont écrit, puis la supprime. */
+/** Ajoute une ligne dans Participations, lit ce que les formules y ont écrit, puis la supprime. */
 async function lireConnexion() {
-  const { table, email, personne } = CONFIG.connexion;
+  const c = CONFIG.participations;
   let id = null;
   try {
-    id = (await grist.docApi.applyUserActions([['AddRecord', table, null, {}]])).retValues[0];
-    const lues = await grist.docApi.fetchTable(table);
+    id = (await grist.docApi.applyUserActions([['AddRecord', c.table, null, {}]])).retValues[0];
+    const lues = await grist.docApi.fetchTable(c.table);
     const i = lues.id.indexOf(id);
     if (i < 0) throw new Error('ligne de connexion introuvable');
-    return { email: texte(lues[email][i]), personne: Number(lues[personne][i]) || 0 };
+    return { email: texte(lues[c.email][i]), personne: Number(lues[c.utilisateur][i]) || 0 };
   } finally {
-    if (id != null) await grist.docApi.applyUserActions([['RemoveRecord', table, id]]).catch((err) => console.warn('Ligne de connexion non supprimée', err));
+    if (id != null) await grist.docApi.applyUserActions([['RemoveRecord', c.table, id]]).catch((err) => console.warn('Ligne de connexion non supprimée', err));
   }
 }
 
 /**
  * Qui suis-je ? Grist n’indique pas l’utilisateur au widget, mais il le donne aux formules évaluées
- * à la création d’une ligne (`user.Email`). Le widget ajoute donc une ligne dans la table à laquelle il est lié :
+ * à la création d’une ligne (`user.Email`). Le widget ajoute donc une ligne dans Participations :
  * la colonne « Email » reçoit l’e-mail de connexion, la colonne « Utilisateur » la personne correspondante de
  * l’Annuaire. Il lit ce résultat puis supprime la ligne : aucune règle d’accès particulière n’est nécessaire.
  */
-async function identifierParConnexion() {
-  const { table, email } = CONFIG.connexion;
+async function identifierParConnexion(existante) {
+  const c = CONFIG.participations;
   try {
-    const existante = await grist.docApi.fetchTable(table);
-    await installerColonnesConnexion(existante, false);
     let connexion = await lireConnexion();
-    if (!connexion.email && email in existante) {
+    if (!connexion.email && c.email in existante) {
       // Colonnes déjà là mais e-mail vide : elles ont sans doute été créées sans déclenchement. On les recrée une fois.
-      await installerColonnesConnexion(existante, true);
+      await installerColonnes(existante, true);
       connexion = await lireConnexion();
     }
     etat.connexion = connexion;
     etat.detailConnexion = connexion.email ? '' : 'adresse de connexion vide';
   } catch (err) {
-    console.warn(`Reconnaissance par la table « ${table} » impossible`, err);
+    console.warn(`Reconnaissance par la table « ${c.table} » impossible`, err);
     etat.connexion = null;
     etat.detailConnexion = `erreur : ${texte(err && err.message).slice(0, 120) || 'inconnue'}`;
   }
 }
 
+/** Premier contact avec Participations : crée les colonnes qui manquent, puis reconnaît la personne connectée. */
+async function preparerParticipations() {
+  const c = CONFIG.participations;
+  let existante;
+  try {
+    existante = await grist.docApi.fetchTable(c.table);
+  } catch (err) {
+    console.error(err);
+    etat.erreurColonnes = `Table « ${c.table} » introuvable : le widget doit être lié à cette table.`;
+    etat.connexion = null;
+    return;
+  }
+  const voulues = [c.email, c.utilisateur, c.evenement, c.statut];
+  if (voulues.some((nom) => !(nom in existante))) {
+    try {
+      await installerColonnes(existante, false);
+      existante = await grist.docApi.fetchTable(c.table);
+      alerter(`Configuration terminée : colonnes ajoutées à la table « ${c.table} ».`);
+    } catch (err) {
+      console.warn('Création des colonnes impossible', err);
+    }
+  }
+  const manquantes = [c.evenement, c.statut].filter((nom) => !(nom in existante));
+  etat.erreurColonnes = manquantes.length
+    ? `Il manque ${manquantes.length > 1 ? 'les colonnes' : 'la colonne'} ${manquantes.join(', ')} dans la table « ${c.table} », et le widget n’a pas pu ${manquantes.length > 1 ? 'les créer' : 'la créer'} : ouvrez-le une fois avec un compte qui peut modifier la structure du document.`
+    : '';
+  await identifierParConnexion(existante);
+}
+
 /** Qui suis-je, parmi les personnes de l’Annuaire ? D’abord par l’e-mail de connexion, sinon (repli) par l’e-mail lisible. */
 function identifierMoi() {
   const definir = (p, logo) => { etat.moi = { id: p.id, nom: p.nom, prenom: p.prenom, logo }; etat.messageMoi = ''; };
+  if (etat.erreurAnnuaire) {
+    etat.moi = null;
+    etat.messageMoi = etat.erreurAnnuaire;
+    return undefined;
+  }
   const connexion = etat.connexion;
   if (connexion && connexion.email) {
     const p = etat.annuaire.find((x) => x.id === connexion.personne);
@@ -326,76 +353,49 @@ function identifierMoi() {
   if (miennes.length === 1) return definir(miennes[0], trouverLogo(miennes[0]));
   etat.moi = null;
   etat.messageMoi = miennes.length
-    ? `Impossible de vous reconnaître (${etat.detailConnexion || 'e-mail de connexion indisponible'}). Ouvrez le widget une fois avec un compte propriétaire et vérifiez que les éditeurs peuvent modifier la table « ${CONFIG.connexion.table} ».`
+    ? `Impossible de vous reconnaître (${etat.detailConnexion || 'e-mail de connexion indisponible'}). Ouvrez le widget une fois avec un compte propriétaire et vérifiez que les éditeurs peuvent modifier la table « ${CONFIG.participations.table} ».`
     : 'Vous n’êtes pas reconnu(e) : connectez-vous avec votre compte pour indiquer votre présence.';
   return undefined;
 }
 
-/** Annuaire -> moi + une présence par personne et par événement. Les logos se retrouvent par l’établissement. */
-function appliquerAnnuaire() {
+/** Moi + les présences de Participations, complétées du nom, du prénom et du logo (par l’établissement) de chaque personne. */
+function appliquerDonnees() {
   identifierMoi();
+  const personnes = new Map(etat.annuaire.map((p) => [p.id, { ...p, logo: trouverLogo(p) }]));
   etat.presences = [];
-  for (const p of etat.annuaire) {
-    if (!p.presents.length && !p.aConfirmer.length) continue;
-    const logo = trouverLogo(p);
-    for (const [evenements, statut] of [[p.presents, 'sur'], [p.aConfirmer, 'probable']]) {
-      for (const evenement of evenements) etat.presences.push({ evenement, utilisateur: p.id, statut, nom: p.nom, prenom: p.prenom, logo });
-    }
+  for (const l of etat.lignes) {
+    const p = personnes.get(l.utilisateur);
+    if (p) etat.presences.push({ ...l, nom: p.nom, prenom: p.prenom, logo: p.logo });
   }
 }
 
 const tousLesLogos = () => etat.presences.map((p) => p.logo).concat(etat.moi ? [etat.moi.logo] : []);
 
-/** Crée dans l’Annuaire les colonnes de présence qui manquent. Renvoie vrai si elles existent ensuite. */
-async function creerColonnes(manquantes) {
-  try {
-    const type = `RefList:${CONFIG.tables.evenements}`;
-    await grist.docApi.applyUserActions(manquantes.map((id) =>
-      ['AddColumn', CONFIG.tables.annuaire, id, { type, isFormula: false, label: ETIQUETTES_COLONNES[id] }]));
-    alerter(`Configuration terminée : ${manquantes.length > 1 ? 'colonnes ajoutées' : 'colonne ajoutée'} à la table « ${CONFIG.tables.annuaire} ».`);
-    return true;
-  } catch (err) {
-    console.error('Création des colonnes impossible', err);
-    return false;
-  }
+/** Présences de Participations, en direct : Grist rappelle cette fonction à chaque changement de la table. */
+function recevoirPresences(enregistrements) {
+  const c = CONFIG.participations;
+  etat.lignes = enregistrements
+    .map((r) => ({ id: r.id, evenement: Number(r[c.evenement]) || 0, utilisateur: Number(r[c.utilisateur]) || 0, statut: codeStatut(r[c.statut]) }))
+    .filter((l) => l.evenement && l.statut);   // les lignes de connexion (sans événement) ne sont pas des présences
+  appliquerDonnees();
+  confirmerMesChoix();
+  preparerJeton(tousLesLogos()).then((nouveau) => nouveau && rendre());
+  rendre();
 }
 
-/**
- * Lit l’Annuaire : qui est là, qui vient à quoi. Appelée au démarrage, à intervalle régulier,
- * et juste après chacun de mes enregistrements.
- */
+/** Lit l’Annuaire (noms, prénoms, établissements). */
 async function chargerAnnuaire() {
-  const numero = ++etat.sequence;
   try {
-    const c = CONFIG.annuaire;
-    let table = await grist.docApi.fetchTable(CONFIG.tables.annuaire);
-    let manquantes = [c.presents, c.aConfirmer].filter((nom) => !(nom in table));
-    if (manquantes.length && !etat.creationTentee) {
-      etat.creationTentee = true;
-      if (await creerColonnes(manquantes)) {
-        table = await grist.docApi.fetchTable(CONFIG.tables.annuaire);
-        manquantes = [c.presents, c.aConfirmer].filter((nom) => !(nom in table));
-      }
-    }
-    if (numero !== etat.sequence) return;   // une lecture plus récente a démarré : celle-ci est dépassée
-    etat.erreurColonnes = manquantes.length
-      ? `Il manque ${manquantes.length > 1 ? 'les colonnes' : 'la colonne'} ${manquantes.join(', ')} dans la table « ${CONFIG.tables.annuaire} », et le widget n’a pas pu ${manquantes.length > 1 ? 'les créer' : 'la créer'} : ouvrez-le une fois avec un compte qui peut modifier la structure du document.`
-      : '';
-    etat.annuaire = lirePersonnes(table);
-    appliquerAnnuaire();
-    confirmerMesChoix();
-    await preparerJeton(tousLesLogos());   // avant l’affichage des logos en pièce jointe
+    etat.annuaire = lirePersonnes(await grist.docApi.fetchTable(CONFIG.tables.annuaire));
+    etat.erreurAnnuaire = '';
   } catch (err) {
     console.error(err);
     if (etat.pret) return;   // panne passagère : on garde ce qui est affiché
     etat.annuaire = [];
-    etat.presences = [];
-    etat.moi = null;
-    etat.messageMoi = `Table « ${CONFIG.tables.annuaire} » inaccessible : identification impossible.`;
+    etat.erreurAnnuaire = `Table « ${CONFIG.tables.annuaire} » inaccessible : identification impossible.`;
   }
-  const signature = JSON.stringify([etat.annuaire, etat.messageMoi, etat.erreurColonnes]);
-  if (signature === etat.signature && etat.pret) return;   // rien n’a changé : on évite de reconstruire la page
-  etat.signature = signature;
+  appliquerDonnees();
+  await preparerJeton(tousLesLogos());   // avant l’affichage des logos en pièce jointe
   rendre();
 }
 
@@ -424,14 +424,14 @@ function logoSrc(v) {
 /* ----------------------------------------------------------------------------
    Présences : calcul à partir des données
    ---------------------------------------------------------------------------- */
-/** Mon statut tel qu’il est enregistré dans l’Annuaire. */
+/** Mon statut tel qu’il est enregistré dans Participations. */
 function statutEnregistre(evenementId) {
   if (!etat.moi) return null;
   const miennes = etat.presences.filter((p) => p.evenement === evenementId && p.utilisateur === etat.moi.id);
   return miennes.some((p) => p.statut === 'sur') ? 'sur' : miennes.length ? 'probable' : null;
 }
 
-/** Mon statut affiché : mon dernier clic, sans attendre que l’Annuaire le confirme. */
+/** Mon statut affiché : mon dernier clic, sans attendre que Participations le confirme. */
 function monStatut(evenementId) {
   if (!etat.moi) return null;
   return etat.choixEnCours.has(evenementId) ? etat.choixEnCours.get(evenementId).statut : statutEnregistre(evenementId);
@@ -458,40 +458,25 @@ const typo = (v) => echapper(v).replace(/ ([:;!?»])/g, `${NBSP}$1`).replace(/«
 
 const nomComplet = (p) => `${p.prenom} ${p.nom}`.trim();
 
-/** Mes deux listes d’événements (présent, à confirmer) : l’Annuaire, corrigé par mes clics en cours. */
-function mesListes() {
-  const sur = new Set();
-  const probable = new Set();
-  for (const p of etat.presences) {
-    if (p.utilisateur === etat.moi.id) (p.statut === 'sur' ? sur : probable).add(p.evenement);
+/** Écrit mon choix dans Participations : une ligne par événement, créée, modifiée ou supprimée (doublons éventuels compris). */
+async function ecrirePresence(evenementId, cible) {
+  const c = CONFIG.participations;
+  const miennes = etat.lignes.filter((l) => l.evenement === evenementId && l.utilisateur === etat.moi.id);
+  const [gardee, ...doublons] = miennes;
+  const actions = [];
+  if (!cible) {
+    if (miennes.length) actions.push(['BulkRemoveRecord', c.table, miennes.map((l) => l.id)]);
+  } else if (gardee) {
+    actions.push(['UpdateRecord', c.table, gardee.id, { [c.statut]: CONFIG.statuts[cible] }]);
+    if (doublons.length) actions.push(['BulkRemoveRecord', c.table, doublons.map((l) => l.id)]);
+  } else {
+    // « Email » et « Utilisateur » se remplissent seuls (formule à la création) : impossible de cocher pour quelqu’un d’autre
+    actions.push(['AddRecord', c.table, null, { [c.evenement]: evenementId, [c.statut]: CONFIG.statuts[cible] }]);
   }
-  for (const [id, choix] of etat.choixEnCours) {
-    sur.delete(id);
-    probable.delete(id);
-    if (choix.statut) (choix.statut === 'sur' ? sur : probable).add(id);
-  }
-  for (const id of sur) probable.delete(id);   // un événement n’est jamais dans les deux listes
-  return { sur: [...sur], probable: [...probable] };
+  if (actions.length) await grist.docApi.applyUserActions(actions);
 }
 
-/** Écrit mes deux listes sur ma ligne de l’Annuaire (une seule écriture, donc jamais de doublon). */
-async function ecrireMesListes() {
-  const c = CONFIG.annuaire;
-  const { sur, probable } = mesListes();
-  await grist.docApi.applyUserActions([
-    ['UpdateRecord', CONFIG.tables.annuaire, etat.moi.id, { [c.presents]: ['L', ...sur], [c.aConfirmer]: ['L', ...probable] }],
-  ]);
-}
-
-// Les écritures partent l’une après l’autre : chacune renvoie mes listes complètes, la dernière a donc raison.
-let fileEcritures = Promise.resolve();
-function enfiler(tache) {
-  const suite = fileEcritures.then(tache);
-  fileEcritures = suite.catch(() => {});
-  return suite;
-}
-
-/** Mes clics enregistrés disparaissent dès que l’Annuaire les reflète (ou, par sécurité, après un délai). */
+/** Mes clics enregistrés disparaissent dès que Participations les reflète (ou, par sécurité, après un délai). */
 function confirmerMesChoix() {
   for (const [id, choix] of etat.choixEnCours) {
     if (choix.ecrit && (statutEnregistre(id) === choix.statut || Date.now() - choix.quand > 15000)) etat.choixEnCours.delete(id);
@@ -506,10 +491,10 @@ async function choisir(evenementId, valeur) {
   etat.choixEnCours.set(evenementId, { statut: cible, ecrit: false, quand: 0 });
   rendre();
   try {
-    await enfiler(ecrireMesListes);
+    await ecrirePresence(evenementId, cible);
     const choix = etat.choixEnCours.get(evenementId);
     if (choix) Object.assign(choix, { ecrit: true, quand: Date.now() });
-    await chargerAnnuaire();   // relecture immédiate : la confirmation n’attend pas le prochain passage
+    confirmerMesChoix();   // Participations a peut-être déjà confirmé le choix pendant l’écriture
   } catch (err) {
     console.error(err);
     etat.choixEnCours.delete(evenementId);
@@ -743,13 +728,12 @@ if (typeof grist === 'undefined' || (window.self === window.top && !grist.simule
   afficherMessage('Ce widget s’utilise dans Grist : ajoutez-le à une page via « Ajouter un widget > Personnalisé ».', true);
 } else {
   grist.ready({ requiredAccess: 'full' });
+  grist.onRecords(recevoirPresences, { includeColumns: 'all' });
   (async () => {
-    await Promise.all([chargerEvenements(), chargerEtablissements(), identifierParConnexion()]);
+    await Promise.all([chargerEvenements(), chargerEtablissements(), preparerParticipations()]);
     await chargerAnnuaire();
     etat.pret = true;
     rendre();
-    setInterval(() => { if (!document.hidden) chargerAnnuaire(); }, CONFIG.directMs);
-    document.addEventListener('visibilitychange', () => { if (!document.hidden) chargerAnnuaire(); });
-    setInterval(() => { chargerEvenements(); chargerEtablissements(); }, CONFIG.rafraichissementMs);
+    setInterval(() => { chargerEvenements(); chargerEtablissements(); chargerAnnuaire(); }, CONFIG.rafraichissementMs);
   })();
 }

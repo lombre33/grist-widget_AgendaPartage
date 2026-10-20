@@ -1,6 +1,6 @@
 # Planning de la Semaine de l’innovation 2026 — widget Grist
 
-Widget personnalisé pour [Grist](https://www.getgrist.com) : le planning de la 3e Semaine de l’innovation (23 - 27 novembre 2026, métropole bordelaise), avec, pour chaque événement, les personnes qui comptent y aller (**présent** ou **à confirmer**) et le logo de leur établissement. Les changements des autres apparaissent en quelques secondes.
+Widget personnalisé pour [Grist](https://www.getgrist.com) : le planning de la 3e Semaine de l’innovation (23 - 27 novembre 2026, métropole bordelaise), avec, pour chaque événement, les personnes qui comptent y aller (**présent** ou **à confirmer**) et le logo de leur établissement. Les changements des autres apparaissent en direct.
 
 HTML, CSS et JavaScript natifs : la seule dépendance est le script officiel `grist-plugin-api.js`.
 
@@ -14,51 +14,48 @@ HTML, CSS et JavaScript natifs : la seule dépendance est le script officiel `gr
 
 ## Mise en place
 
-1. **Ajouter le widget** : sur une page, *Ajouter un widget* → *Personnalisé*, URL de `index.html` hébergé (voir plus bas), niveau d’accès **Accès complet au document**. Données : la table **`Participations`** (un simple support : elle ne garde aucune donnée). Rien n’est à associer dans le panneau du widget.
-2. **L’ouvrir une fois avec un compte propriétaire** : le widget ajoute lui-même les colonnes dont il a besoin (un message « Configuration terminée » s’affiche) : deux dans l’`Annuaire` pour les présences, deux dans `Participations` pour reconnaître la personne connectée. Rien à créer à la main, pas de formule à écrire.
-3. C’est tout, si les règles d’accès autorisent ce qui est listé dans « Règles d’accès » plus bas (c’est déjà le cas avec les règles actuelles du document).
+1. **Ajouter le widget** : sur une page, *Ajouter un widget* → *Personnalisé*, URL de `index.html` hébergé (voir plus bas), niveau d’accès **Accès complet au document**. Données : la table **`Participations`**. Rien n’est à associer dans le panneau du widget.
+2. **L’ouvrir une fois avec un compte propriétaire** : le widget crée lui-même les colonnes de `Participations` (un message « Configuration terminée » s’affiche). Rien à créer à la main, pas de formule à écrire.
+3. C’est tout, si les règles d’accès autorisent ce qui est listé dans « Règles d’accès » plus bas (c’est le cas tant qu’aucune règle ne restreint `Participations`).
 
 ## Tables Grist
 
 | Table | Rôle | Colonnes utilisées par le widget |
 | --- | --- | --- |
 | `Evenements` | import de l’Excel | `Jour` (Date), `Debut`, `Fin`, `Titre`, `Sous_titre`, `Type`, `Temps_fort`, `Lieu`, `Ville`, `Adresse`, `Public`, `Description`, `Lien` |
-| `Annuaire` | une ligne par personne | `email`, `nom`, `prenom`, `nom_de_domaine`, `Etablissement` (texte), et les deux colonnes de présence ci-dessous |
+| `Annuaire` | une ligne par personne, **en lecture seule pour le widget** | `email`, `nom`, `prenom`, `nom_de_domaine`, `Etablissement` (texte) |
 | `Etablissement` | un logo par établissement | `Nom_complet`, `nom_de_domaine`, `Logo` (pièce jointe) |
+| `Participations` | **une ligne par présence**, c’est la table liée au widget | colonnes ci-dessous, créées par le widget |
 
-Colonnes ajoutées par le widget à l’`Annuaire` (type *liste de références* vers `Evenements`) :
+Colonnes créées par le widget dans `Participations` :
 
-| Colonne | Contenu |
-| --- | --- |
-| `Evenements_presents` | les événements où la personne est **présente** |
-| `Evenements_a_confirmer` | les événements où sa présence est **à confirmer** |
+| Colonne | Type | Contenu |
+| --- | --- | --- |
+| `Evenement` | référence → `Evenements` | l’événement coché |
+| `Statut` | choix : `présent`, `à confirmer` | écrit par le widget |
+| `Email` | texte, formule « à la création » | `user.Email` : l’e-mail de la personne qui a coché |
+| `Utilisateur` | référence → `Annuaire`, formule | la ligne de l’`Annuaire` qui a cet e-mail (sans tenir compte des majuscules) |
 
-Le logo d’une personne est celui de son établissement, retrouvé par le nom de domaine (sinon par le nom de l’établissement). La table liée au widget n’est qu’un support : seule la ligne de la personne connectée est modifiée dans l’`Annuaire`, et jamais ses autres colonnes. Dans l’`Annuaire`, vous pouvez régler l’affichage de ces deux colonnes sur `Titre` pour y lire les noms des événements.
+`Email` et `Utilisateur` se remplissent seuls à la création de la ligne : le widget ne les écrit pas, donc personne ne peut cocher à la place d’un autre. Le logo d’une personne est celui de son établissement, retrouvé par le nom de domaine (sinon par le nom de l’établissement). Les présences arrivent dans le widget en direct, sans relecture. Dans `Participations`, vous pouvez régler l’affichage de `Evenement` sur `Titre` pour y lire les noms des événements.
 
-Les présences des autres sont relues toutes les 5 secondes (`CONFIG.directMs`) : Grist ne prévient le widget que des changements de la table à laquelle il est lié.
+**Pourquoi pas dans l’`Annuaire` ?** Si le document déclare un *attribut utilisateur* sur l’`Annuaire` (règles d’accès, par exemple `acl` : `user.Email` → `Annuaire.email`), Grist recharge la page de la personne dès que sa propre ligne de l’`Annuaire` change. Les présences ne passent donc jamais par l’`Annuaire`. Une première version y enregistrait deux colonnes (`Evenements_presents` et `Evenements_a_confirmer`) : si elles existent encore, vous pouvez les supprimer.
 
 ## Reconnaître la personne connectée
 
-Grist ne dit pas au widget qui est connecté, mais il le donne aux formules évaluées à la création d’une ligne (`user.Email`). À l’ouverture, le widget ajoute donc une ligne dans `Participations`, lit le résultat puis la supprime :
-
-| Colonne de `Participations` | Contenu |
-| --- | --- |
-| `Email` | formule « à la création » : `user.Email` |
-| `Utilisateur` | formule : la ligne de l’`Annuaire` qui a cet e-mail (sans tenir compte des majuscules) |
+Grist ne dit pas au widget qui est connecté, mais il le donne aux formules évaluées à la création d’une ligne (`user.Email`). À l’ouverture, le widget ajoute donc une ligne dans `Participations`, lit le résultat des colonnes `Email` et `Utilisateur`, puis la supprime.
 
 - Aucune règle d’accès particulière sur l’e-mail n’est nécessaire : il peut rester lisible par tous dans l’`Annuaire`.
 - Si l’adresse de connexion n’est pas dans l’`Annuaire`, le widget affiche cette adresse et passe en lecture seule.
-- Repli, si la ligne ne peut pas être ajoutée : le widget prend la ligne de l’`Annuaire` dont l’e-mail est le seul lisible (règle `rec.email == user.Email` sur la colonne `email`). Si plusieurs e-mails sont lisibles, il le dit en haut de page.
+- Repli, si la ligne ne peut pas être ajoutée : le widget prend la ligne de l’`Annuaire` dont l’e-mail est le seul lisible (règle `rec.email == user.Email` sur la colonne `email`). Sinon un message en haut de page donne la raison.
 
 ## Règles d’accès
 
 Le widget a seulement besoin que :
 
-- tout le monde puisse **lire** `Annuaire`, `Etablissement` et `Evenements` ;
-- chaque éditeur puisse **modifier sa propre ligne** de l’`Annuaire` (règle `rec.email == user.Email` → modification autorisée, les autres → refusée, ce qui empêche de cocher à la place d’un autre ; elle peut être limitée aux colonnes `Evenements_presents` et `Evenements_a_confirmer`) ;
+- tout le monde puisse **lire** `Annuaire`, `Etablissement`, `Evenements` et `Participations` ;
 - chaque éditeur puisse **ajouter et supprimer des lignes** dans `Participations` (c’est le cas tant qu’aucune règle ne l’interdit).
 
-Si une synchronisation réécrit des lignes entières de l’`Annuaire`, vérifier qu’elle ne vide pas les deux colonnes de présence (elles ne font pas partie des colonnes synchronisées).
+Recommandé, pour qu’on ne puisse pas modifier ou supprimer les présences des autres : sur `Participations`, modification et suppression autorisées seulement si `rec.Email == user.Email` (les propriétaires : `user.Access in [OWNER]` en premier).
 
 ## Hébergement
 GitHub Pages : *Settings* → *Pages* → *Deploy from a branch* → `main`, dossier `/ (root)`. L’URL du widget est alors `https://<compte>.github.io/<dépôt>/`.
@@ -71,7 +68,7 @@ GitHub Pages : *Settings* → *Pages* → *Deploy from a branch* → `main`, dos
 ```sh
 python3 -m http.server 8000
 ```
-puis ouvrir <http://localhost:8000/dev/>. Le faux Grist reprend la structure des tables ci-dessus et simule des participants (bouton « Un autre participant bouge » pour voir la mise à jour en direct, dans les 5 secondes). Options d’URL : `?moi=2` (autre personne), `?restreint` (l’Annuaire ne montre que sa ligne), `?ambigu` (tous les e-mails lisibles, comme dans le vrai document), `?anonyme` (personne non connectée), `?inconnu` (connecté avec une adresse absente de l’Annuaire), `?sans-declencheur` (`user.Email` ne donne rien : repli sur l’e-mail lisible), `?sans-ajout` (impossible d’ajouter une ligne dans `Participations`), `?sans-colonnes` (les colonnes de présence n’existent pas encore : le widget les crée), `?sans-droits` (… mais la structure n’est pas modifiable), `?ecriture-refusee` (les règles d’accès refusent l’écriture), `?vide` (aucune présence).
+puis ouvrir <http://localhost:8000/dev/>. Le faux Grist reprend la structure des tables ci-dessus et simule des participants (bouton « Un autre participant bouge » pour voir la mise à jour en direct). Options d’URL : `?moi=2` (autre personne), `?restreint` (l’Annuaire ne montre que sa ligne), `?ambigu` (tous les e-mails lisibles, comme dans le vrai document), `?anonyme` (personne non connectée), `?inconnu` (connecté avec une adresse absente de l’Annuaire), `?sans-declencheur` (`user.Email` ne donne rien : repli sur l’e-mail lisible), `?declencheur-casse` (colonnes d’une version précédente, à recréer), `?sans-ajout` (impossible d’ajouter une ligne dans `Participations`), `?sans-colonnes` (les colonnes n’existent pas encore : le widget les crée), `?sans-droits` (… mais la structure n’est pas modifiable), `?ecriture-refusee` (les règles d’accès refusent d’enregistrer une présence), `?vide` (aucune présence).
 
 ## Mettre à jour les événements
 Modifier la liste `EVENEMENTS` dans `data/build_xlsx.py` puis `python3 data/build_xlsx.py` (nécessite `openpyxl`), ou modifier directement la table `Evenements` dans Grist : le widget relit les événements chaque minute.
