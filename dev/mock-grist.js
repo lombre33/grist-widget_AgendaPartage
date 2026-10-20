@@ -7,7 +7,10 @@
    Options d'URL :  ?moi=2          se connecter comme la personne n° 2 (1 par défaut)
                     ?restreint      l'Annuaire ne montre que sa propre ligne (au lieu de masquer les e-mails des autres)
                     ?ambigu         tous les e-mails de l'Annuaire sont lisibles : personne n'est reconnu
-                    ?anonyme        aucun e-mail lisible : personne non reconnue
+                    ?anonyme        personne non connectée à Grist (e-mail de connexion vide, aucun e-mail lisible)
+                    ?inconnu        connecté avec une adresse absente de l'Annuaire
+                    ?sans-declencheur  la formule « à la création » (user.Email) ne donne rien : le widget se rabat sur l'e-mail lisible
+                    ?sans-ajout     les règles d'accès interdisent d'ajouter une ligne dans Participations
                     ?sans-colonnes  l'Annuaire n'a pas encore les colonnes de présence : le widget doit les créer
                     ?sans-droits    ... mais la structure du document n'est pas modifiable par cette personne
                     ?ecriture-refusee  les règles d'accès refusent toute modification de l'Annuaire
@@ -65,6 +68,15 @@
   // Ce que renvoie Grist : liste encodée ['L', ...] ou, quand elle est vide, null (les deux formes sont lues par le widget)
   const enListe = (ids, id) => (ids.length ? (id % 2 ? ['L', ...ids] : [...ids]) : null);
 
+  // --- Participations : table vide qui sert de support au widget (colonnes A, B, C par défaut) -----
+  const emailConnecte = params.has('anonyme') ? '' : params.has('inconnu') ? 'quelquun@exemple.org' : parId(moiId).email;
+  const colonnesParticipations = ['A', 'B', 'C'];
+  const infosColonnes = {};
+  let participations = [];
+  let prochaineParticipation = 1;
+  // Formule « Utilisateur » : la personne de l'Annuaire qui a l'e-mail de connexion
+  const personneDe = (mail) => (ANNUAIRE.find((p) => mail && p.email.toLowerCase() === mail.toLowerCase()) || { id: 0 }).id;
+
   // --- Ce que Grist renvoie pour l'Annuaire selon les règles d'accès --------------------------
   function annuaireVisible() {
     const avecPresences = (p) => ({
@@ -84,6 +96,7 @@
   const enColonnes = (lignes, cols = Object.keys(lignes[0] || { id: 0 })) =>
     Object.fromEntries(cols.map((c) => [c, lignes.map((l) => l[c])]));
   window.MOCK_ACTIONS = [];
+  window.MOCK_COLONNES = infosColonnes;   // définitions des colonnes créées dans Participations
 
   window.grist = {
     simule: true,
@@ -96,15 +109,35 @@
         if (nom === 'Evenements') return enColonnes(window.MOCK_EVENEMENTS);
         if (nom === 'Annuaire') return enColonnes(annuaireVisible(), ['id', 'prenom', 'nom', 'email', 'Etablissement', 'nom_de_domaine', ...colonnes]);
         if (nom === 'Etablissement') return enColonnes(ETABLISSEMENTS);
+        if (nom === 'Participations') return enColonnes(participations, ['id', ...colonnesParticipations]);
         throw new Error(`Table inconnue : ${nom}`);
       },
       async applyUserActions(actions) {
         await attendre();
         window.MOCK_ACTIONS.push(JSON.parse(JSON.stringify(actions)));
+        const retValues = [];
         for (const [type, table, ...args] of actions) {
+          retValues.push(null);
+          if (type === 'AddColumn' && params.has('sans-droits')) throw new Error('Blocked by table structure access rules');
+          if (table === 'Participations') {
+            if (type === 'AddColumn') {
+              colonnesParticipations.push(args[0]);
+              infosColonnes[args[0]] = args[1];
+            } else if (type === 'AddRecord') {
+              if (params.has('sans-ajout')) throw new Error('Blocked by table create access rules');
+              const email = params.has('sans-declencheur') ? '' : emailConnecte;
+              const ligne = { id: prochaineParticipation++, Email: email, Utilisateur: personneDe(email) };
+              participations.push(ligne);
+              retValues[retValues.length - 1] = ligne.id;
+            } else if (type === 'RemoveRecord') {
+              participations = participations.filter((l) => l.id !== args[0]);
+            } else {
+              throw new Error(`Action inconnue : ${type}`);
+            }
+            continue;
+          }
           if (table !== 'Annuaire') throw new Error(`Table inconnue : ${table}`);
           if (type === 'AddColumn') {
-            if (params.has('sans-droits')) throw new Error('Blocked by table structure access rules');
             if (!colonnes.includes(args[0])) colonnes.push(args[0]);
           } else if (type === 'UpdateRecord') {
             const [id, champs] = args;
@@ -118,7 +151,7 @@
             throw new Error(`Action inconnue : ${type}`);
           }
         }
-        return actions.map(() => null);
+        return { retValues };
       },
       async getAccessToken() { return { token: 'faux', baseUrl: 'https://exemple.invalid/api/docs/x', ttlMsecs: 600000 }; },
     },

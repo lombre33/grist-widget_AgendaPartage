@@ -10,8 +10,9 @@
                      y sont enregistrées, dans deux colonnes que le widget crée lui-même
                      à la première ouverture (CONFIG.annuaire.presents et .aConfirmer)
    - Etablissement : le logo de chaque établissement
-   Le widget peut être lié à n’importe quelle table (par exemple « Participations ») : il ne lit
-   que les tables ci-dessus, avec docApi, et n’a rien à associer dans le panneau du widget.
+   - Participations : la table à laquelle le widget est lié ; elle ne contient aucune donnée durable :
+                     le widget y crée une ligne le temps de savoir qui est connecté (voir identifierParConnexion)
+   Le widget lit les autres tables avec docApi et n’a rien à associer dans son panneau.
    ============================================================================ */
 
 /* ----------------------------------------------------------------------------
@@ -29,9 +30,16 @@ const CONFIG = {
     type: 'Type', tempsFort: 'Temps_fort', lieu: 'Lieu', ville: 'Ville',
     adresse: 'Adresse', public: 'Public', description: 'Description', lien: 'Lien',
   },
+  // Table liée au widget, utilisée pour reconnaître la personne connectée (voir identifierParConnexion).
+  // Le widget y crée les deux colonnes ci-dessous, si elles n’existent pas.
+  connexion: {
+    table: 'Participations',
+    email: 'Email',                      // formule « à la création » : user.Email
+    personne: 'Utilisateur',             // formule : la ligne de l’Annuaire qui a cet e-mail
+  },
   // Colonnes de la table Annuaire.
   annuaire: {
-    email: 'email',                      // sert à reconnaître la personne connectée (voir identifierMoi)
+    email: 'email',                      // rapproché de l’e-mail de connexion (voir identifierMoi)
     nom: 'nom',
     prenom: 'prenom',
     domaine: 'nom_de_domaine',           // lien avec l’établissement (en priorité)
@@ -77,6 +85,7 @@ const etat = {
   logos: { parDomaine: new Map(), parNom: new Map() },   // index des logos, construit au chargement
   annuaire: [],                // une entrée par personne : { id, nom, prenom, domaine, etablissement, email, presents, aConfirmer }
   presences: [],               // une entrée par personne et par événement, déduite de l’annuaire
+  connexion: null,             // { email, personne } : e-mail de connexion et ligne de l’Annuaire correspondante, null si indisponible
   moi: null,                   // { id, nom, prenom, logo } : ma ligne dans l’Annuaire
   messageMoi: '',              // pourquoi moi est vide (mode lecture seule)
   erreurColonnes: '',          // colonnes de présence absentes de l’Annuaire et impossibles à créer
@@ -234,25 +243,64 @@ function lirePersonnes(table) {
   }));
 }
 
+/** Formule de la colonne « Utilisateur » de la table de connexion : la personne de l’Annuaire qui a l’e-mail de connexion. */
+const FORMULE_PERSONNE = [
+  `mail = ($${CONFIG.connexion.email} or "").strip().lower()`,
+  `return next((p for p in ${CONFIG.tables.annuaire}.all if mail and (p.${CONFIG.annuaire.email} or "").strip().lower() == mail), None)`,
+].join('\n');
+
 /**
- * Qui suis-je ? Grist n’indique pas l’utilisateur au widget. On s’appuie donc sur les règles
- * d’accès de l’Annuaire : l’e-mail n’y est lisible que sur sa propre ligne (règle `rec.email == user.Email`),
- * qu’il s’agisse de la colonne seule (les autres lignes sont alors masquées) ou de la table entière
- * (on ne voit alors que sa ligne). La ligne dont l’e-mail est lisible est la mienne.
- * C’est la seule fonction à adapter si l’identification se fait autrement.
+ * Qui suis-je ? Grist n’indique pas l’utilisateur au widget, mais il le donne aux formules évaluées
+ * à la création d’une ligne (`user.Email`). Le widget ajoute donc une ligne dans la table à laquelle il est lié :
+ * la colonne « Email » reçoit l’e-mail de connexion, la colonne « Utilisateur » la personne correspondante de
+ * l’Annuaire. Il lit ce résultat puis supprime la ligne : aucune règle d’accès particulière n’est nécessaire.
  */
-function identifierMoi() {
-  const miennes = etat.annuaire.filter((p) => p.email);
-  if (miennes.length === 1) {
-    const { id, nom, prenom } = miennes[0];
-    etat.moi = { id, nom, prenom, logo: trouverLogo(miennes[0]) };
-    etat.messageMoi = '';
-  } else {
-    etat.moi = null;
-    etat.messageMoi = miennes.length
-      ? `Plusieurs e-mails sont lisibles dans la table « ${CONFIG.tables.annuaire} » : une règle d’accès doit réserver la colonne e-mail à sa propre ligne.`
-      : 'Vous n’êtes pas reconnu(e) : connectez-vous avec votre compte pour indiquer votre présence.';
+async function identifierParConnexion() {
+  const { table, email, personne } = CONFIG.connexion;
+  let id = null;
+  try {
+    const existante = await grist.docApi.fetchTable(table);
+    const actions = [];
+    if (!(email in existante)) {
+      actions.push(['AddColumn', table, email, { type: 'Text', isFormula: false, formula: 'user.Email', recalcWhen: 1, label: 'E-mail de connexion' }]);   // recalcWhen 1 : à la création de la ligne seulement
+    }
+    if (!(personne in existante)) {
+      actions.push(['AddColumn', table, personne, { type: `Ref:${CONFIG.tables.annuaire}`, isFormula: true, formula: FORMULE_PERSONNE, label: 'Personne' }]);
+    }
+    if (actions.length) await grist.docApi.applyUserActions(actions);
+    id = (await grist.docApi.applyUserActions([['AddRecord', table, null, {}]])).retValues[0];
+    const lues = await grist.docApi.fetchTable(table);
+    const i = lues.id.indexOf(id);
+    if (i < 0) throw new Error('Ligne de connexion introuvable');
+    etat.connexion = { email: texte(lues[email][i]), personne: Number(lues[personne][i]) || 0 };
+  } catch (err) {
+    console.warn(`Reconnaissance par la table « ${table} » impossible`, err);
+    etat.connexion = null;
+  } finally {
+    if (id != null) await grist.docApi.applyUserActions([['RemoveRecord', table, id]]).catch((err) => console.warn('Ligne de connexion non supprimée', err));
   }
+}
+
+/** Qui suis-je, parmi les personnes de l’Annuaire ? D’abord par l’e-mail de connexion, sinon (repli) par l’e-mail lisible. */
+function identifierMoi() {
+  const definir = (p, logo) => { etat.moi = { id: p.id, nom: p.nom, prenom: p.prenom, logo }; etat.messageMoi = ''; };
+  const connexion = etat.connexion;
+  if (connexion && connexion.email) {
+    const p = etat.annuaire.find((x) => x.id === connexion.personne);
+    if (p) return definir(p, trouverLogo(p));
+    etat.moi = null;
+    etat.messageMoi = `Votre adresse de connexion (${connexion.email}) n’est pas dans la table « ${CONFIG.tables.annuaire} » : demandez à y être ajouté(e) pour indiquer votre présence.`;
+    return undefined;
+  }
+  // Repli : une règle d’accès peut réserver la colonne e-mail de l’Annuaire à sa propre ligne
+  // (`rec.email == user.Email`) ; la ligne dont l’e-mail est lisible est alors la mienne.
+  const miennes = etat.annuaire.filter((p) => p.email);
+  if (miennes.length === 1) return definir(miennes[0], trouverLogo(miennes[0]));
+  etat.moi = null;
+  etat.messageMoi = miennes.length
+    ? `Impossible de vous reconnaître : le widget doit pouvoir ajouter une ligne temporaire dans la table « ${CONFIG.connexion.table} ». Ouvrez-le une fois avec un compte propriétaire, et vérifiez que les éditeurs peuvent modifier cette table.`
+    : 'Vous n’êtes pas reconnu(e) : connectez-vous avec votre compte pour indiquer votre présence.';
+  return undefined;
 }
 
 /** Annuaire -> moi + une présence par personne et par événement. Les logos se retrouvent par l’établissement. */
@@ -668,7 +716,7 @@ if (typeof grist === 'undefined' || (window.self === window.top && !grist.simule
 } else {
   grist.ready({ requiredAccess: 'full' });
   (async () => {
-    await Promise.all([chargerEvenements(), chargerEtablissements()]);
+    await Promise.all([chargerEvenements(), chargerEtablissements(), identifierParConnexion()]);
     await chargerAnnuaire();
     etat.pret = true;
     rendre();
