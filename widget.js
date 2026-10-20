@@ -64,7 +64,7 @@ const LIBELLES = {
 };
 
 /* Numéro de version, affiché en bas de page : il permet de vérifier quelle version Grist a chargée (cache du navigateur). */
-const VERSION = '2026-10-20 · e';
+const VERSION = '2026-10-20 · f';
 
 const JOURS_SEMAINE = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
 const MOIS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
@@ -383,8 +383,15 @@ function appliquerDonnees() {
 const tousLesLogos = () => etat.presences.map((p) => p.logo).concat(etat.moi ? [etat.moi.logo] : []);
 
 /** Présences de Participations, en direct : Grist rappelle cette fonction à chaque changement de la table. */
+/** Pied de page : la version du widget et ce que Participations contient vraiment (pour vérifier que les choix y arrivent). */
+function majPied(nbLignes) {
+  const lignes = nbLignes == null ? '' : ` · ${nombre(nbLignes, ['ligne', 'lignes'])} dans « ${CONFIG.participations.table} »`;
+  el('version').textContent = `Version ${VERSION}${lignes}`;
+}
+
 function recevoirPresences(enregistrements) {
   const c = CONFIG.participations;
+  majPied(enregistrements.length);
   etat.lignes = enregistrements
     .map((r) => ({ id: r.id, evenement: Number(r[c.evenement]) || 0, utilisateur: Number(r[c.utilisateur]) || 0, statut: codeStatut(r[c.statut]) }))
     .filter((l) => l.evenement && l.statut);   // les lignes de connexion (sans événement) ne sont pas des présences
@@ -767,7 +774,7 @@ document.addEventListener('error', (ev) => {
 if (typeof grist === 'undefined' || (window.self === window.top && !grist.simule)) {
   afficherMessage('Ce widget s’utilise dans Grist : ajoutez-le à une page via « Ajouter un widget > Personnalisé ».', true);
 } else {
-  el('version').textContent = `Version ${VERSION}`;
+  majPied();
   grist.ready({ requiredAccess: 'full' });
   grist.onRecords(recevoirPresences, { includeColumns: 'all' });
   (async () => {
