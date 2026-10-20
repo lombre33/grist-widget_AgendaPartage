@@ -13,20 +13,23 @@
          alt="Semaine de l’innovation – Explorez, expérimentez, partagez – 23 - 27 novembre 2026">
     <div class="entete__titre">
       <h1>Le planning</h1>
-      <p class="entete__edition">3e édition</p>
-      <p class="entete__lieu">Sur les campus de la métropole bordelaise</p>
+      <p class="entete__sous"><span class="entete__edition">3e édition</span><span class="entete__lieu">Sur les campus de la métropole bordelaise</span></p>
     </div>
     <div class="entete__actions">
       <div class="entete__moi" id="moi"></div>
-      <button class="filtre" id="filtre" type="button" aria-pressed="false" data-focus="filtre"></button>
+      <button class="filtre" id="filtre" type="button" aria-pressed="false" data-focus="filtre" hidden></button>
     </div>
   </header>
 
-  <div class="etat" id="etat" role="status" aria-live="polite"></div>
+  <div class="etat" id="etat" role="status" aria-live="polite">Chargement du planning…</div>
+
+  <p class="legende" aria-hidden="true">✓ présent · ? à confirmer</p>
 
   <nav class="onglets" id="onglets" aria-label="Jours de la semaine"></nav>
 
-  <main class="planning" id="planning"></main>
+  <main class="planning" id="planning" aria-busy="true">
+    <div class="squelettes" aria-hidden="true"><div class="squelette"></div><div class="squelette"></div><div class="squelette"></div></div>
+  </main>
 
   <footer class="pied">
     <section class="pied__avant">
@@ -42,7 +45,7 @@
     </p>
   </footer>
 
-  <div class="toast" id="toast" role="alert" hidden></div>
+  <div class="toast" id="toast" role="alert" title="Fermer" hidden></div>
 
   <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
   <script src="widget.js?v=20261020g"></script>

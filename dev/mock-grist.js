@@ -19,6 +19,7 @@
                     ?ecriture-perdue   Grist accepte l'écriture d'une présence mais la ligne n'existe pas ensuite
                     ?utilisateur-vide  la ligne d'une présence est écrite sans « Utilisateur » (la formule « à la création » ne donne rien)
                     ?vide           démarrer sans aucune présence
+                    ?foule          60 personnes de plus inscrites à l'événement 3 (liste longue, groupée par établissement)
 
    Pour les tests : window.MOCK_ACTIONS liste les lots d'actions reçus par applyUserActions. Toute action sur
    l'Annuaire est refusée : le widget ne doit pas y écrire (l'attribut utilisateur « acl » recharge le document). */
@@ -53,6 +54,12 @@
   ];
   const moiId = Number(params.get('moi')) || 1;
   const parId = (id) => ANNUAIRE.find((p) => p.id === id);
+  if (params.has('foule')) {   // 60 personnes de plus, toutes inscrites à l'événement 3 : pour voir la liste groupée par établissement
+    for (let i = 9; i <= 68; i++) {
+      const e = ETABLISSEMENTS[i % ETABLISSEMENTS.length];
+      ANNUAIRE.push(personne(i, `Prénom${i}`, `Nom${i}`, e.nom_de_domaine, e.Nom_complet));
+    }
+  }
 
   // --- Participations : une ligne par présence + les lignes de connexion éphémères du widget -------
   const emailConnecte = params.has('anonyme') ? '' : params.has('inconnu') ? 'quelquun@exemple.org' : parId(moiId).email;
@@ -79,6 +86,7 @@
       [19, 5, 'présent'], [21, 3, 'présent'], [22, 8, 'présent'], [26, 4, 'présent'], [26, 6, 'présent'], [26, 7, 'présent'], [26, 3, 'présent'], [26, 8, 'à confirmer'],
       [7, moiId, 'à confirmer']];
     demo.forEach(([e, p, st]) => ajouterPresence(p, e, st));
+    if (params.has('foule')) ANNUAIRE.filter((p) => p.id >= 9).forEach((p) => ajouterPresence(p.id, 3, p.id % 5 ? 'présent' : 'à confirmer'));
   }
 
   // --- Ce que Grist renvoie pour l'Annuaire selon les règles d'accès --------------------------

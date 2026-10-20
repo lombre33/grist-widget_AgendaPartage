@@ -49,6 +49,7 @@ const CONFIG = {
   // Colonnes de la table Etablissement.
   etablissements: {
     nom: 'Nom_complet',
+    acronyme: 'Acronyme',                // initiales affichées quand l’établissement n’a pas de logo
     domaine: 'nom_de_domaine',
     logo: 'Logo',                        // colonne Pièces jointes, ou lien web (https://…)
   },
@@ -92,7 +93,9 @@ const etat = {
   verrous: new Set(),          // evenements dont l’écriture est en cours
   jour: null,                  // onglet affiché (écrans étroits)
   seulementMesEvenements: false,
-  ouverts: new Set(),          // evenements dont le détail est déplié
+  ouverts: new Set(),          // evenements dont la liste des participants est dépliée
+  infos: new Set(),            // evenements dont les informations pratiques sont dépliées
+  toutVoir: new Set(),         // evenements dont la longue liste des participants est affichée en entier
   jeton: null,                 // { token, baseUrl, expire } pour les logos en pièce jointe
 };
 
@@ -141,6 +144,12 @@ function versIso(v) {
   if (m) return `${m[1]}-${m[2]}-${m[3]}`;
   m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(s);
   return m ? `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}` : '';
+}
+
+/** Date du jour dans le fuseau de l’appareil, 'AAAA-MM-JJ' (toISOString donnerait la date UTC : la veille juste après minuit). */
+function aujourdhuiIso() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 /** '09:30', '9h30' ou fraction de jour (heure Excel) -> { h, m }. */
@@ -203,7 +212,7 @@ async function chargerEvenements() {
       .sort((a, b) => a.jour.localeCompare(b.jour) || minutesDe(a.debut) - minutesDe(b.debut) || minutesDe(a.fin) - minutesDe(b.fin) || a.id - b.id);
     const jours = joursDuPlanning();
     if (!jours.includes(etat.jour)) {
-      const aujourdhui = new Date().toISOString().slice(0, 10);
+      const aujourdhui = aujourdhuiIso();
       etat.jour = jours.includes(aujourdhui) ? aujourdhui : jours[0] || null;
     }
     etat.erreur = '';
@@ -223,8 +232,9 @@ async function chargerEtablissements() {
     for (const l of etat.etablissements) {
       const domaine = sansAccent(l[e.domaine]);
       const nom = sansAccent(l[e.nom]);
-      if (domaine && !etat.logos.parDomaine.has(domaine)) etat.logos.parDomaine.set(domaine, l[e.logo]);
-      if (nom && !etat.logos.parNom.has(nom)) etat.logos.parNom.set(nom, l[e.logo]);
+      const fiche = { cle: domaine || nom, nom: texte(l[e.nom]), acronyme: texte(l[e.acronyme]), logo: l[e.logo] };
+      if (domaine && !etat.logos.parDomaine.has(domaine)) etat.logos.parDomaine.set(domaine, fiche);
+      if (nom && !etat.logos.parNom.has(nom)) etat.logos.parNom.set(nom, fiche);
     }
   } catch (err) {
     console.error('Logos des établissements indisponibles', err);
@@ -239,8 +249,16 @@ async function chargerEtablissements() {
 /** Logo de l’établissement d’une personne de l’Annuaire : par nom de domaine, sinon par nom. */
 function trouverLogo(personne) {
   const { parDomaine, parNom } = etat.logos;
-  const logo = parDomaine.get(sansAccent(personne.domaine)) ?? parNom.get(sansAccent(personne.etablissement));
-  return logo ?? null;
+  return parDomaine.get(sansAccent(personne.domaine))?.logo ?? parNom.get(sansAccent(personne.etablissement))?.logo ?? null;
+}
+
+/** Établissement d’une personne : { cle, nom, acronyme }, pour regrouper les participants (la fiche de l’établissement, sinon le texte de l’Annuaire). */
+function trouverEtablissement(personne) {
+  const { parDomaine, parNom } = etat.logos;
+  const fiche = parDomaine.get(sansAccent(personne.domaine)) ?? parNom.get(sansAccent(personne.etablissement));
+  if (fiche) return fiche;
+  const nom = personne.etablissement || personne.domaine;
+  return { cle: sansAccent(nom), nom, acronyme: '' };
 }
 
 /** Annuaire (colonnes-tableaux renvoyées par Grist) -> liste de personnes. */
@@ -381,11 +399,11 @@ function identifierMoi() {
 /** Moi + les présences de Participations, complétées du nom, du prénom et du logo (par l’établissement) de chaque personne. */
 function appliquerDonnees() {
   identifierMoi();
-  const personnes = new Map(etat.annuaire.map((p) => [p.id, { ...p, logo: trouverLogo(p) }]));
+  const personnes = new Map(etat.annuaire.map((p) => [p.id, { ...p, logo: trouverLogo(p), etab: trouverEtablissement(p) }]));
   etat.presences = [];
   for (const l of etat.lignes) {
     const p = personnes.get(l.utilisateur);
-    if (p) etat.presences.push({ ...l, nom: p.nom, prenom: p.prenom, logo: p.logo });
+    if (p) etat.presences.push({ ...l, nom: p.nom, prenom: p.prenom, logo: p.logo, etab: p.etab });
   }
 }
 
@@ -475,9 +493,28 @@ function participantsDe(evenementId) {
     if (!deja || (deja.statut === 'probable' && p.statut === 'sur')) parPersonne.set(cle, { ...p, moi: false });
   }
   const mien = monStatut(evenementId);
-  if (mien) parPersonne.set('moi', { ...etat.moi, statut: mien, moi: true });
+  if (mien) parPersonne.set('moi', { ...etat.moi, etab: etablissementDeMoi(), statut: mien, moi: true });
   const rang = { sur: 0, probable: 1 };
-  return [...parPersonne.values()].sort((a, b) => rang[a.statut] - rang[b.statut] || nomComplet(a).localeCompare(nomComplet(b), 'fr'));
+  return [...parPersonne.values()].sort((a, b) => rang[a.statut] - rang[b.statut] || Number(b.moi) - Number(a.moi)
+    || a.nom.localeCompare(b.nom, 'fr') || a.prenom.localeCompare(b.prenom, 'fr'));
+}
+
+/** Mon établissement (celui de ma ligne dans l’Annuaire). */
+function etablissementDeMoi() {
+  const p = etat.annuaire.find((x) => x.id === etat.moi.id);
+  return p ? trouverEtablissement(p) : { cle: '', nom: '', acronyme: '' };
+}
+
+/** Participants regroupés par établissement, les plus nombreux d’abord. */
+function groupesDe(gens) {
+  const groupes = new Map();
+  for (const p of gens) {
+    if (!groupes.has(p.etab.cle)) groupes.set(p.etab.cle, { etab: p.etab, logo: p.logo, sur: 0, probable: 0, gens: [] });
+    const g = groupes.get(p.etab.cle);
+    g[p.statut] += 1;
+    g.gens.push(p);
+  }
+  return [...groupes.values()].sort((a, b) => b.gens.length - a.gens.length || a.etab.nom.localeCompare(b.etab.nom, 'fr'));
 }
 
 /** Espaces insécables avant « : ; ! ? » et autour des guillemets français, pour éviter les retours à la ligne orphelins. */
@@ -564,10 +601,36 @@ function nombre(n, [singulier, pluriel]) {
   return `${n} ${n > 1 ? pluriel : singulier}`;
 }
 
-function afficherMessage(msg, erreur = false) {
+/** Message d’état. Le détail technique (noms de colonnes, réglages) ne sert qu’à l’administrateur : il reste replié. */
+function afficherMessage(msg, erreur = false, detail = '') {
   const zone = el('etat');
-  zone.textContent = msg;
+  const cle = `${msg}|${detail}`;
+  if (zone.dataset.cle !== cle) {   // inutile de reconstruire (et de refermer le détail) si rien n’a changé
+    zone.dataset.cle = cle;
+    zone.textContent = msg;
+    if (msg && detail) {
+      const details = document.createElement('details');
+      details.className = 'etat__detail';
+      const resume = document.createElement('summary');
+      resume.textContent = 'Détail pour l’administrateur';
+      const technique = document.createElement('p');
+      technique.textContent = detail;
+      details.append(resume, technique);
+      zone.append(details);
+    }
+  }
   zone.classList.toggle('etat--erreur', Boolean(msg) && erreur);
+}
+
+/** Les messages techniques de ce fichier, reformulés pour les participants : { texte, detail }. */
+function messageSimple(technique) {
+  const cas = [
+    [/^Il manque /, 'Le planning n’est pas encore prêt à enregistrer les présences : la configuration du document est incomplète. Prévenez l’organisateur.'],
+    [/^Table « .+ » (introuvable|inaccessible)/, 'Le planning n’est pas disponible pour le moment. Prévenez l’organisateur.'],
+    [/^Impossible de lire la table/, 'Le planning est momentanément indisponible. Réessayez dans un instant ou prévenez l’organisateur.'],
+    [/^Impossible de vous reconnaître/, 'Vous n’êtes pas reconnu(e) pour l’instant : le planning reste en lecture seule. Prévenez l’organisateur.'],
+  ].find(([motif]) => motif.test(technique));
+  return cas ? { texte: cas[1], detail: technique } : { texte: technique, detail: '' };
 }
 
 let minuteurToast;
@@ -579,71 +642,118 @@ function alerter(msg, dureeMs = 5000) {
   minuteurToast = setTimeout(() => { toast.hidden = true; }, dureeMs);
 }
 
-function rendreAvatar(p) {
-  const initiales = ((p.prenom[0] || '') + (p.nom[0] || '')).toUpperCase() || '?';
+/** Logo (ou initiales à défaut) : celui d’une personne par défaut, ou d’un établissement si `titre` et `initiales` sont donnés. */
+function rendreAvatar(p, titre = nomComplet(p), initiales = ((p.prenom[0] || '') + (p.nom[0] || '')).toUpperCase() || '?') {
   const classe = `avatar${p.statut === 'probable' ? ' avatar--probable' : ''}`;
   const src = logoSrc(p.logo);
   return src
-    ? `<img class="${classe}" src="${echapper(src)}" alt="" title="${echapper(nomComplet(p))}" data-initiales="${echapper(initiales)}">`
-    : `<span class="${classe}" title="${echapper(nomComplet(p))}">${echapper(initiales)}</span>`;
+    ? `<img class="${classe}" src="${echapper(src)}" alt="" title="${echapper(titre)}" data-initiales="${echapper(initiales)}">`
+    : `<span class="${classe}" title="${echapper(titre)}">${echapper(initiales)}</span>`;
 }
 
+const initialesEtab = (e) => (e.acronyme.slice(0, 4) || e.nom.split(/[\s'’-]+/).filter((m) => m.length > 2).map((m) => m[0]).join('').slice(0, 3) || e.nom.slice(0, 2)).toUpperCase() || '?';
+
+/** Le logo d’un établissement, avec le nombre de personnes quand elles sont plusieurs ; en pointillés si personne n’est sûr de venir. */
+function rendreGroupeLogo(g) {
+  const detail = [g.sur && nombre(g.sur, LIBELLES.sur.resume), g.probable && nombre(g.probable, LIBELLES.probable.resume)].filter(Boolean).join(', ');
+  const avatar = rendreAvatar({ logo: g.logo, statut: g.sur ? 'sur' : 'probable' }, `${g.etab.nom || 'Autres'} : ${detail}`, initialesEtab(g.etab));
+  return `<span class="groupe-logo">${avatar}${g.gens.length > 1 ? `<span class="groupe-logo__n" aria-hidden="true">${g.gens.length}</span>` : ''}</span>`;
+}
+
+const SEUIL_GROUPES = 8;    // au-delà, la liste des participants est regroupée par établissement
+const LIMITE_LISTE = 12;    // ... et limitée à ce nombre de noms, jusqu’à ce qu’on demande la suite
+
+/** Ligne de présence : les établissements en logo et en nombre, les compteurs, et la liste des participants à déplier. */
 function rendreParticipants(evenement) {
   const gens = participantsDe(evenement.id);
+  if (!gens.length) return '<p class="evt__personne">Personne pour l’instant</p>';
   const sur = gens.filter((p) => p.statut === 'sur').length;
   const probable = gens.length - sur;
-  const resumeTexte = gens.length
-    ? [sur && nombre(sur, LIBELLES.sur.resume), probable && nombre(probable, LIBELLES.probable.resume)].filter(Boolean).join(', ')
-    : 'Personne pour l’instant';
-  // « ✓ 5 présents  ? 1 à confirmer » ; sur les colonnes étroites, seuls les symboles et les nombres restent (CSS)
-  const compte = (classe, symbole, n) => (n ? `<span class="compte compte--${classe}">${symbole}${NBSP}${n}<span class="compte__mot"> ${n > 1 ? LIBELLES[classe].resume[1] : LIBELLES[classe].resume[0]}</span></span>` : '');
-  const resume = gens.length ? [compte('sur', '✓', sur), compte('probable', '?', probable)].filter(Boolean).join(' ') : 'Personne pour l’instant';
-  const visibles = gens.slice(0, 4);
-  const reste = gens.length - visibles.length;
+  const resumeTexte = [sur && nombre(sur, LIBELLES.sur.resume), probable && nombre(probable, LIBELLES.probable.resume)].filter(Boolean).join(', ');
+  // « ✓ 5 présents  ? 1 à confirmer » ; sur les colonnes étroites, seuls les symboles et les nombres restent (CSS, avec une légende)
+  const compte = (classe, symbole, n) => (n ? `<span class="compte compte--${classe}" title="${echapper(nombre(n, LIBELLES[classe].resume))}">${symbole}${NBSP}${n}<span class="compte__mot"> ${n > 1 ? LIBELLES[classe].resume[1] : LIBELLES[classe].resume[0]}</span></span>` : '');
+  const resume = [compte('sur', '✓', sur), compte('probable', '?', probable)].filter(Boolean).join(' ');
+  const visibles = groupesDe(gens).slice(0, 3);
+  const reste = gens.length - visibles.reduce((n, g) => n + g.gens.length, 0);
   const ouvert = etat.ouverts.has(evenement.id);
-  const pile = gens.length ? `<span class="pile">${visibles.map(rendreAvatar).join('')}${reste > 0 ? `<span class="avatar avatar--reste">+${reste}</span>` : ''}</span>` : '';
+  const pile = `<span class="pile">${visibles.map(rendreGroupeLogo).join('')}${reste > 0 ? `<span class="avatar avatar--reste" title="${echapper(nombre(reste, ['autre personne', 'autres personnes']))}">+${reste}</span>` : ''}</span>`;
   return `
     <button class="evt__qui" type="button" data-action="detail" data-evt="${evenement.id}" data-focus="detail-${evenement.id}"
-            aria-expanded="${ouvert}" aria-controls="detail-${evenement.id}" aria-label="${echapper(resumeTexte)} : afficher les détails">
+            aria-expanded="${ouvert}" aria-controls="detail-${evenement.id}" aria-label="Participants : ${echapper(resumeTexte)}">
       ${pile}
       <span class="evt__resume">${resume}</span>
-      <span class="evt__plus">Détails</span>
+      <span class="evt__plus">Participants</span>
     </button>`;
 }
 
-function rendreDetail(evenement) {
+function rendreLigne(p, avecEtablissement) {
+  return `
+    <li>${avecEtablissement ? rendreAvatar(p) : ''}
+      <span class="liste-qui__qui"><span class="liste-qui__nom">${echapper(nomComplet(p) || 'Anonyme')}${p.moi ? ' (vous)' : ''}</span>${avecEtablissement && p.etab.nom ? `<span class="liste-qui__etab">${echapper(p.etab.nom)}</span>` : ''}</span>
+      <span class="badge${p.statut === 'sur' ? ' badge--sur' : ''}">${LIBELLES[p.statut].badge}</span>
+    </li>`;
+}
+
+/** Liste des participants : à plat jusqu’à SEUIL_GROUPES personnes, puis par établissement et limitée à LIMITE_LISTE noms. */
+function rendreListe(evenement) {
   const gens = participantsDe(evenement.id);
+  if (!gens.length) return '';
+  let corps;
+  let bouton = '';
+  if (gens.length <= SEUIL_GROUPES) {
+    corps = `<ul class="liste-qui">${gens.map((p) => rendreLigne(p, true)).join('')}</ul>`;
+  } else {
+    const tout = etat.toutVoir.has(evenement.id);
+    let place = tout ? gens.length : LIMITE_LISTE;
+    corps = groupesDe(gens).map((g) => {
+      const montres = g.gens.slice(0, place);
+      place -= montres.length;
+      if (!montres.length) return '';
+      return `
+        <section class="groupe">
+          <h4 class="groupe__tete">${rendreAvatar({ logo: g.logo, statut: 'sur' }, g.etab.nom, initialesEtab(g.etab))}<span>${echapper(g.etab.nom || 'Autres')}</span><span class="groupe__n">${g.gens.length}</span></h4>
+          <ul class="liste-qui">${montres.map((p) => rendreLigne(p, false)).join('')}</ul>
+        </section>`;
+    }).join('');
+    const masques = tout ? 0 : Math.max(0, gens.length - LIMITE_LISTE);
+    const libelle = masques ? `Voir les ${masques} autres` : tout ? 'Réduire la liste' : '';
+    if (libelle) bouton = `<button class="detail__tout" type="button" data-action="tout" data-evt="${evenement.id}" data-focus="tout-${evenement.id}">${libelle}</button>`;
+  }
+  return `<div class="evt__detail" id="detail-${evenement.id}">${corps}${bouton}</div>`;
+}
+
+/** Informations pratiques d’un événement (adresse, public, description, fiche) ; vide s’il n’y en a pas. */
+function rendreInfos(evenement) {
   const carte = lienCarte(evenement);
   const adresse = evenement.adresse && carte
     ? `<a href="${echapper(carte)}" target="_blank" rel="noopener" title="Ouvrir dans Google Maps">${echapper(evenement.adresse)} <span aria-hidden="true">↗</span></a>`
     : echapper(evenement.adresse);
   const infos = [['Public', echapper(evenement.public)], ['Adresse', adresse]].filter(([, v]) => v);
+  if (!infos.length && !evenement.description && !evenement.lien) return '';
   return `
-    <div class="evt__detail" id="detail-${evenement.id}">
-      ${gens.length ? `<ul class="liste-qui">${gens.map((p) => `
-        <li>${rendreAvatar(p)}
-          <span class="liste-qui__nom">${echapper(nomComplet(p) || 'Anonyme')}${p.moi ? ' (vous)' : ''}</span>
-          <span class="badge${p.statut === 'sur' ? ' badge--sur' : ''}">${LIBELLES[p.statut].badge}</span>
-        </li>`).join('')}</ul>` : ''}
+    <div class="evt__detail" id="infos-${evenement.id}">
       ${infos.length ? `<dl class="detail__infos">${infos.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>` : ''}
       ${evenement.description ? `<p>${echapper(evenement.description)}</p>` : ''}
       ${evenement.lien ? `<a href="${echapper(evenement.lien)}" target="_blank" rel="noopener">Voir la fiche sur le site <span aria-hidden="true">↗</span></a>` : ''}
     </div>`;
 }
 
+/** Mon choix : deux boutons ; recliquer sur celui qui est choisi retire la présence (le ✕ le rappelle). */
 function rendreActions(evenement) {
   if (!etat.moi || etat.erreurColonnes) return '';   // personne non reconnue ou colonnes absentes : lecture seule, un message l’explique en haut de page
   const mien = monStatut(evenement.id);
-  const bloque = etat.verrous.has(evenement.id);
-  const bouton = (valeur, libelle) => `
+  const bloque = etat.verrous.has(evenement.id);   // écriture en cours : les clics sont ignorés (voir choisir), les boutons ne changent pas d’aspect
+  const bouton = (valeur, libelle) => {
+    const choisi = mien === valeur;
+    return `
     <button type="button" data-action="choisir" data-evt="${evenement.id}" data-valeur="${valeur}" data-focus="${valeur}-${evenement.id}"
-            aria-pressed="${mien === valeur}" ${bloque ? 'disabled' : ''}>${libelle}</button>`;
+            aria-pressed="${choisi}"${choisi ? ' title="Recliquer pour retirer ma présence"' : ''}>${libelle}${choisi ? '<span class="choix__x" aria-hidden="true">✕</span><span class="sr-only"> (recliquer pour retirer)</span>' : ''}</button>`;
+  };
   return `
     <div class="evt__actions">
-      <div class="choix" role="group" aria-label="Ma présence : ${echapper(evenement.titre)}">
+      <div class="choix" role="group" aria-busy="${bloque}" aria-label="Ma présence : ${echapper(evenement.titre)}">
         ${bouton('sur', LIBELLES.sur.bouton)}${bouton('probable', LIBELLES.probable.bouton)}
       </div>
-      ${mien && !bloque ? `<button class="retirer" type="button" data-action="choisir" data-evt="${evenement.id}" data-focus="retirer-${evenement.id}">Retirer</button>` : ''}
     </div>`;
 }
 
@@ -658,20 +768,27 @@ function rendreLieu(e) {
 
 function rendreEvenement(e) {
   const heure = e.fin
-    ? `${formaterHeure(e.debut)} - ${formaterHeure(e.fin)}`
+    ? `${formaterHeure(e.debut)}${NBSP}–${NBSP}${formaterHeure(e.fin)}`
     : e.debut ? `À partir de ${formaterHeure(e.debut)}` : '';
   const fort = e.tempsFort ? `<span class="evt__fort">Temps fort / ${echapper(e.tempsFort)}</span>` : '';
+  const infos = rendreInfos(e);
+  const infosOuvertes = etat.infos.has(e.id);
+  const boutonInfos = infos
+    ? `<button class="evt__info" type="button" data-action="infos" data-evt="${e.id}" data-focus="infos-${e.id}" aria-expanded="${infosOuvertes}" aria-controls="infos-${e.id}"
+              aria-label="Informations pratiques : ${echapper(e.titre)}" title="Informations pratiques"><span aria-hidden="true">i</span></button>`
+    : '';
   return `
     <article class="evt${e.tempsFort ? ' evt--fort' : ''}">
       ${fort}
       <div class="evt__ligne">
         <p><span class="evt__heure">${heure}</span>${e.type ? `<span class="evt__type">${echapper(e.type)}</span>` : ''}</p>
-        ${e.lien ? `<a class="evt__fiche" href="${echapper(e.lien)}" target="_blank" rel="noopener" aria-label="Voir la fiche : ${echapper(e.titre)}">↗</a>` : ''}
+        ${boutonInfos}
       </div>
-      <h3 class="evt__titre">${typo(e.titre)}${e.sousTitre ? `<span class="evt__sous">${typo(e.sousTitre)}</span>` : ''}</h3>
+      <h3 class="evt__titre">${typo(e.titre)}${e.sousTitre ? `<span class="sr-only">. </span><span class="evt__sous">${typo(e.sousTitre)}</span>` : ''}</h3>
       <p class="evt__lieu">${rendreLieu(e)}</p>
+      ${infosOuvertes ? infos : ''}
       ${rendreParticipants(e)}
-      ${etat.ouverts.has(e.id) ? rendreDetail(e) : ''}
+      ${etat.ouverts.has(e.id) ? rendreListe(e) : ''}
       ${rendreActions(e)}
     </article>`;
 }
@@ -690,14 +807,21 @@ function rendreEntete() {
   filtre.hidden = !etat.moi || Boolean(etat.erreurColonnes);
   filtre.setAttribute('aria-pressed', String(etat.seulementMesEvenements));
   filtre.textContent = `Mon programme${nb ? ` (${nb})` : ''}`;
+  filtre.title = 'Ne garder que les événements où vous êtes présent(e) ou à confirmer';
 }
+
+/** Nombre d’événements de « mon programme » (présent ou à confirmer) ce jour-là. */
+const mesEvenementsDuJour = (iso) => etat.evenements.filter((e) => e.jour === iso && monStatut(e.id)).length;
+
+const pluriel = (n) => `${n} événement${n > 1 ? 's' : ''} dans votre programme`;
 
 function rendreOnglets(jours) {
   el('onglets').innerHTML = jours.map((iso) => {
     const j = infosJour(iso);
-    const aDesChoix = etat.evenements.some((e) => e.jour === iso && monStatut(e.id));
-    return `<button class="onglet" type="button" data-jour="${iso}" data-focus="jour-${iso}"${iso === etat.jour ? ' aria-current="true"' : ''}>
-      <small>${j.nom.slice(0, 3)}.</small><strong>${j.numero}</strong>${aDesChoix ? '<span class="onglet__point" title="Vous participez ce jour-là"></span>' : ''}</button>`;
+    const n = mesEvenementsDuJour(iso);
+    const nom = `${j.nom} ${j.numero} ${j.mois}`;
+    return `<button class="onglet" type="button" data-jour="${iso}" data-focus="jour-${iso}" aria-pressed="${iso === etat.jour}" aria-label="${echapper(n ? `${nom} : ${pluriel(n)}` : nom)}">
+      <small>${j.nom.slice(0, 3)}.</small><strong>${j.numero}</strong>${n ? `<span class="onglet__n" aria-hidden="true">${n}</span>` : ''}</button>`;
   }).join('');
 }
 
@@ -711,8 +835,8 @@ function rendrePlanning(jours) {
     return `
       <section class="jour${iso === etat.jour ? ' jour--actif' : ''}" aria-label="${j.nom} ${j.numero} ${j.mois}">
         <header class="jour__tete">
-          <div><span class="jour__nom">${j.nom}</span><span class="jour__date">${j.numero} ${j.mois}</span></div>
-          <i class="jour__point"></i>
+          <h2 class="jour__titre"><span class="jour__nom">${j.nom}</span><span class="jour__date">${j.numero} ${j.mois}</span></h2>
+          ${mesEvenementsDuJour(iso) ? `<span class="jour__mes"><span aria-hidden="true">✓ ${mesEvenementsDuJour(iso)}</span><span class="sr-only">${pluriel(mesEvenementsDuJour(iso))}</span></span>` : ''}
         </header>
         <div class="jour__liste">${contenu}</div>
       </section>`;
@@ -721,11 +845,13 @@ function rendrePlanning(jours) {
 
 function rendre() {
   if (!etat.pret) return;   // le premier affichage attend la fin du premier chargement
-  if (etat.erreurColonnes) afficherMessage(etat.erreurColonnes, true);
-  else if (etat.erreur) afficherMessage(etat.erreur, true);
-  else if (!etat.moi && etat.messageMoi) afficherMessage(etat.messageMoi);
-  else if (!etat.evenements.length) afficherMessage('Aucun événement à afficher.');
+  const technique = etat.erreurColonnes || etat.erreur || (!etat.moi && etat.messageMoi) || '';
+  if (technique) {
+    const { texte: simple, detail } = messageSimple(technique);
+    afficherMessage(simple, Boolean(etat.erreurColonnes || etat.erreur), detail);
+  } else if (!etat.evenements.length) afficherMessage('Aucun événement à afficher.');
   else afficherMessage('');
+  el('planning').removeAttribute('aria-busy');
 
   // Le contenu est reconstruit : on redonne le focus au bouton utilisé (accessibilité clavier).
   const actif = document.activeElement;
@@ -757,13 +883,18 @@ document.addEventListener('click', (ev) => {
   } else if (cible.dataset.action === 'detail') {
     const id = Number(cible.dataset.evt);
     if (!etat.ouverts.delete(id)) etat.ouverts.add(id);
+  } else if (cible.dataset.action === 'infos' || cible.dataset.action === 'tout') {
+    const ensemble = cible.dataset.action === 'infos' ? etat.infos : etat.toutVoir;
+    const id = Number(cible.dataset.evt);
+    if (!ensemble.delete(id)) ensemble.add(id);
   } else if (cible.dataset.action === 'choisir') {
-    if (!cible.dataset.valeur) etat.focus = `sur-${cible.dataset.evt}`;   // « Retirer » disparaît
     choisir(Number(cible.dataset.evt), cible.dataset.valeur);
     return;
   }
   rendre();
 });
+
+el('toast').addEventListener('click', () => { el('toast').hidden = true; });
 
 // Un logo qui ne charge pas est remplacé par les initiales de la personne.
 document.addEventListener('error', (ev) => {

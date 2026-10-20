@@ -8,6 +8,7 @@ HTML, CSS et JavaScript natifs : la seule dépendance est le script officiel `gr
 | --- | --- |
 | `index.html`, `style.css`, `widget.js` | le widget (l’URL à donner à Grist est celle de `index.html`) |
 | `assets/logo-semaine-innovation.jpg` | logo tiré du planning officiel |
+| `assets/fonts/` | la police Bitter (graisses 400 et 700, licence OFL jointe), servie avec le widget : aucun appel à un service extérieur |
 | `data/Evenements_Semaine_Innovation_2026.xlsx` | les 30 séances, à importer dans Grist |
 | `data/build_xlsx.py` | génère l’Excel (et les données de test) à partir de la liste des événements |
 | `dev/` | faux Grist pour tester dans un navigateur, sans Grist |
@@ -57,6 +58,14 @@ Le widget a seulement besoin que :
 
 Recommandé, pour qu’on ne puisse pas modifier ou supprimer les présences des autres : sur `Participations`, modification et suppression autorisées seulement si `rec.Email == user.Email` (les propriétaires : `user.Access in [OWNER]` en premier).
 
+## Affichage
+
+- **Participants** : sur chaque carte, un logo par établissement (les trois plus représentés), avec le nombre de personnes quand elles sont plusieurs ; en pointillés quand personne n’est sûr de venir. Le bouton « Participants » déplie la liste (à plat jusqu’à 8 personnes, puis groupée par établissement et limitée à 12 noms avec « Voir les N autres »).
+- **Informations pratiques** : le « i » en haut à droite de chaque carte déplie l’adresse (lien vers la carte), le public, la description et le lien vers la fiche du site.
+- **Mon choix** : « Présent » et « À confirmer » ; recliquer sur le bouton choisi retire la présence.
+- **Écrans** : cinq colonnes dès 1180 px de large, un onglet par jour en dessous, un en-tête réduit dans les petits widgets. Les largeurs se règlent dans `style.css` (`@media`).
+- **Messages** : les participants voient un texte simple ; le détail technique (noms de colonnes, réglages) est dans « Détail pour l’administrateur », replié.
+
 ## Hébergement
 GitHub Pages : *Settings* → *Pages* → *Deploy from a branch* → `main`, dossier `/ (root)`. L’URL du widget est alors `https://<compte>.github.io/<dépôt>/`.
 
@@ -68,7 +77,7 @@ GitHub Pages : *Settings* → *Pages* → *Deploy from a branch* → `main`, dos
 ```sh
 python3 -m http.server 8000
 ```
-puis ouvrir <http://localhost:8000/dev/>. Le faux Grist reprend la structure des tables ci-dessus et simule des participants (bouton « Un autre participant bouge » pour voir la mise à jour en direct). Options d’URL : `?moi=2` (autre personne), `?restreint` (l’Annuaire ne montre que sa ligne), `?ambigu` (tous les e-mails lisibles, comme dans le vrai document), `?anonyme` (personne non connectée), `?inconnu` (connecté avec une adresse absente de l’Annuaire), `?sans-declencheur` (`user.Email` ne donne rien : repli sur l’e-mail lisible), `?declencheur-casse` (colonnes d’une version précédente, à recréer), `?sans-ajout` (impossible d’ajouter une ligne dans `Participations`), `?sans-colonnes` (les colonnes n’existent pas encore : le widget les crée), `?sans-droits` (… mais la structure n’est pas modifiable), `?ecriture-refusee` (les règles d’accès refusent d’enregistrer une présence), `?vide` (aucune présence).
+puis ouvrir <http://localhost:8000/dev/>. Le faux Grist reprend la structure des tables ci-dessus et simule des participants (bouton « Un autre participant bouge » pour voir la mise à jour en direct). Options d’URL : `?moi=2` (autre personne), `?restreint` (l’Annuaire ne montre que sa ligne), `?ambigu` (tous les e-mails lisibles, comme dans le vrai document), `?anonyme` (personne non connectée), `?inconnu` (connecté avec une adresse absente de l’Annuaire), `?sans-declencheur` (`user.Email` ne donne rien : repli sur l’e-mail lisible), `?declencheur-casse` (colonnes d’une version précédente, à recréer), `?sans-ajout` (impossible d’ajouter une ligne dans `Participations`), `?sans-colonnes` (les colonnes n’existent pas encore : le widget les crée), `?sans-droits` (… mais la structure n’est pas modifiable), `?ecriture-refusee` (les règles d’accès refusent d’enregistrer une présence), `?vide` (aucune présence), `?foule` (60 personnes de plus inscrites à un événement : liste longue, groupée par établissement).
 
 ## Mettre à jour les événements
 Modifier la liste `EVENEMENTS` dans `data/build_xlsx.py` puis `python3 data/build_xlsx.py` (nécessite `openpyxl`), ou modifier directement la table `Evenements` dans Grist : le widget relit les événements chaque minute.
