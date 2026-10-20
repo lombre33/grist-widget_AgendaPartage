@@ -86,6 +86,10 @@ a { color: var(--magenta); }
 .evt__sous { display: block; }
 .evt__lieu { margin-top: 6px; font-size: 0.85rem; color: var(--gris); }
 .evt--fort .evt__lieu { color: var(--brun); }
+.evt__carte { display: inline-flex; gap: 6px; align-items: flex-start; min-height: 32px; padding: 2px 0; color: inherit; text-decoration: none; }
+.evt__carte:hover span, .evt__carte:focus-visible span { text-decoration: underline; }
+.evt__epingle { flex: none; margin-top: 2px; color: var(--magenta); }
+.evt--fort .evt__epingle { color: var(--brun); }
 
 /* Participants */
 .evt__qui { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px; margin-top: 4px; padding: 2px 0; border: 0; background: none; text-align: left; }

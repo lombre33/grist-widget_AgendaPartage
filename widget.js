@@ -64,7 +64,7 @@ const LIBELLES = {
 };
 
 /* Numéro de version, affiché en bas de page : il permet de vérifier quelle version Grist a chargée (cache du navigateur). */
-const VERSION = '2026-10-20 · d';
+const VERSION = '2026-10-20 · e';
 
 const JOURS_SEMAINE = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
 const MOIS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
@@ -143,6 +143,14 @@ function versHeure(v) {
   const m = /^(\d{1,2})\s*[:hH]\s*(\d{2})?/.exec(texte(v));
   return m ? { h: Number(m[1]), m: Number(m[2] || 0) } : null;
 }
+
+/** Lien de recherche Google Maps (sans clé d’API) : l’adresse si elle est connue, sinon le lieu et la ville. */
+function lienCarte(e) {
+  const recherche = e.adresse || [e.lieu, e.ville].filter(Boolean).join(', ');
+  return recherche ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(recherche)}` : '';
+}
+
+const ICONE_LIEU = '<svg class="evt__epingle" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false"><path fill="currentColor" d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5z"/></svg>';
 
 const NBSP = ' ';
 const formaterHeure = ({ h, m }) => (m ? `${h}${NBSP}h${NBSP}${String(m).padStart(2, '0')}` : `${h}${NBSP}h`);
@@ -589,7 +597,11 @@ function rendreParticipants(evenement) {
 
 function rendreDetail(evenement) {
   const gens = participantsDe(evenement.id);
-  const infos = [['Public', evenement.public], ['Adresse', evenement.adresse]].filter(([, v]) => v);
+  const carte = lienCarte(evenement);
+  const adresse = evenement.adresse && carte
+    ? `<a href="${echapper(carte)}" target="_blank" rel="noopener" title="Ouvrir dans Google Maps">${echapper(evenement.adresse)} <span aria-hidden="true">↗</span></a>`
+    : echapper(evenement.adresse);
+  const infos = [['Public', echapper(evenement.public)], ['Adresse', adresse]].filter(([, v]) => v);
   return `
     <div class="evt__detail" id="detail-${evenement.id}">
       ${gens.length ? `<ul class="liste-qui">${gens.map((p) => `
@@ -597,7 +609,7 @@ function rendreDetail(evenement) {
           <span class="liste-qui__nom">${echapper(nomComplet(p) || 'Anonyme')}${p.moi ? ' (vous)' : ''}</span>
           <span class="badge${p.statut === 'sur' ? ' badge--sur' : ''}">${LIBELLES[p.statut].badge}</span>
         </li>`).join('')}</ul>` : ''}
-      ${infos.length ? `<dl class="detail__infos">${infos.map(([k, v]) => `<dt>${k}</dt><dd>${echapper(v)}</dd>`).join('')}</dl>` : ''}
+      ${infos.length ? `<dl class="detail__infos">${infos.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>` : ''}
       ${evenement.description ? `<p>${echapper(evenement.description)}</p>` : ''}
       ${evenement.lien ? `<a href="${echapper(evenement.lien)}" target="_blank" rel="noopener">Voir la fiche sur le site <span aria-hidden="true">↗</span></a>` : ''}
     </div>`;
@@ -619,6 +631,15 @@ function rendreActions(evenement) {
     </div>`;
 }
 
+/** Le lieu et la ville, en lien vers une carte (nouvel onglet) quand on sait où chercher. */
+function rendreLieu(e) {
+  const texteLieu = `${echapper(e.lieu)}${e.ville ? `<br>${echapper(e.ville)}` : ''}`;
+  const carte = lienCarte(e);
+  if (!carte) return texteLieu;
+  const nom = [e.lieu, e.ville].filter(Boolean).join(', ');
+  return `<a class="evt__carte" href="${echapper(carte)}" target="_blank" rel="noopener" title="Ouvrir dans Google Maps" aria-label="${echapper(`Voir sur la carte : ${nom}`)}">${ICONE_LIEU}<span>${texteLieu}</span></a>`;
+}
+
 function rendreEvenement(e) {
   const heure = e.fin
     ? `${formaterHeure(e.debut)} - ${formaterHeure(e.fin)}`
@@ -632,7 +653,7 @@ function rendreEvenement(e) {
         ${e.lien ? `<a class="evt__fiche" href="${echapper(e.lien)}" target="_blank" rel="noopener" aria-label="Voir la fiche : ${echapper(e.titre)}">↗</a>` : ''}
       </div>
       <h3 class="evt__titre">${typo(e.titre)}${e.sousTitre ? `<span class="evt__sous">${typo(e.sousTitre)}</span>` : ''}</h3>
-      <p class="evt__lieu">${echapper(e.lieu)}${e.ville ? `<br>${echapper(e.ville)}` : ''}</p>
+      <p class="evt__lieu">${rendreLieu(e)}</p>
       ${rendreParticipants(e)}
       ${etat.ouverts.has(e.id) ? rendreDetail(e) : ''}
       ${rendreActions(e)}
