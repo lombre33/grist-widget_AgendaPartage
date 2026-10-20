@@ -520,3 +520,117 @@ describe('erreurs d\'écriture', () => {
     await texteAttendu(page, SEL.toast, /ligne écrite sans « Utilisateur »/);
   });
 });
+
+describe('accès : connexion (personne anonyme) et demande d\'ajout à l\'Annuaire (connectée, absente)', () => {
+  const fenetre = (page) => page.locator('#acces[open]');
+  const demandes = (page) => actions(page).then((lots) => lots.flat().filter((a) => a[1] === 'Demandes_Annuaire'));
+
+  test('document ouvert à tous, personne non connectée : une fenêtre illustrée explique la connexion, le planning reste lisible', async () => {
+    const page = await ouvrir({ requete: '?public&anonyme' });
+    await fenetre(page).waitFor();
+    assert.match(await fenetre(page).locator('h2').innerText(), /Connectez-vous pour participer/);
+    const texte = await fenetre(page).innerText();
+    assert.match(texte, /Cliquez sur « Se connecter »/);
+    assert.match(texte, /Choisissez ProConnect/);
+    assert.match(texte, /même connexion que pour Resana/);
+    assert.equal(await fenetre(page).locator('figure svg[role="img"]').count(), 3, 'trois étapes illustrées');
+    assert.equal(await page.locator(SEL.evenement).count(), 30);
+    assert.equal(await page.locator('button[data-action="choisir"]').count(), 0);
+    // rien n'est écrit : la ligne de sondage est refusée à une personne anonyme
+    assert.deepEqual((await demandes(page)).map((a) => a[0]), ['AddRecord']);
+    assert.equal((await lignes(page)).length, 0 + (await lignes(page)).length);
+    // fermer, puis la rouvrir par le bouton de l'en-tête
+    await fenetre(page).getByRole('button', { name: 'J’ai compris' }).click();
+    await page.locator('#acces[open]').waitFor({ state: 'detached' });
+    await page.locator('#moi button').click();
+    await fenetre(page).waitFor();
+    await page.keyboard.press('Escape');
+    await page.locator('#acces[open]').waitFor({ state: 'detached' });
+    assert.match(await page.locator(SEL.etat).innerText(), /connectez-vous à Grist avec votre adresse professionnelle/);
+    aucuneErreur(page);
+  });
+
+  test('la fenêtre n\'est montrée d\'office qu\'une fois : une mise à jour en direct ne la rouvre pas', async () => {
+    const page = await ouvrir({ requete: '?public&anonyme' });
+    await fenetre(page).waitFor();
+    await page.keyboard.press('Escape');
+    await page.locator('#acces[open]').waitFor({ state: 'detached' });
+    await page.locator('#simuler').click();
+    await attendre(() => page.locator('#simuler-info').innerText().then((t) => t.length > 0));
+    await pause(600);
+    assert.equal(await page.locator('#acces[open]').count(), 0);
+  });
+
+  test('connectée mais absente de l\'Annuaire (document ouvert à tous) : le formulaire inscrit la demande avec son e-mail de connexion', async () => {
+    const page = await ouvrir({ requete: '?public&inconnu' });
+    await fenetre(page).waitFor();
+    assert.match(await fenetre(page).innerText(), /avec quelquun@exemple\.org/i);
+    assert.match(await fenetre(page).locator('h2').innerText(), /pas encore dans l’annuaire/);
+    assert.equal(await fenetre(page).locator('input[name="emailSaisi"]').inputValue(), 'quelquun@exemple.org', 'l\'e-mail de connexion est proposé');
+    assert.deepEqual(await fenetre(page).locator('datalist option').evaluateAll((os) => os.map((o) => o.value)).then((v) => v.slice(0, 2)), ['Université de Bordeaux', 'Bordeaux INP']);
+    // champs obligatoires : rien n'est envoyé tant qu'ils ne sont pas remplis
+    await fenetre(page).getByRole('button', { name: 'Envoyer ma demande' }).click();
+    assert.equal((await demandes(page)).filter((a) => a[3] && a[3].Nom).length, 0);
+    await fenetre(page).locator('input[name="prenom"]').fill('Sam');
+    await fenetre(page).locator('input[name="nom"]').fill('<img src=x onerror=alert(1)>');
+    await fenetre(page).locator('input[name="etablissement"]').fill('Association  locale');
+    await fenetre(page).getByRole('button', { name: 'Envoyer ma demande' }).click();
+    await attendre(async () => /votre demande est enregistrée/.test(await fenetre(page).locator('h2').innerText()), { message: 'la confirmation n\'apparaît pas' });
+    const envoi = (await demandes(page)).find((a) => a[0] === 'AddRecord' && a[3] && a[3].Nom);
+    assert.deepEqual(envoi[3], { Nom: '<img src=x onerror=alert(1)>', Prenom: 'Sam', Email_saisi: 'quelquun@exemple.org', Etablissement: 'Association locale' });
+    assert.equal(await fenetre(page).locator('img').count(), 0, 'rien n\'est interprété comme du HTML');
+    assert.match(await fenetre(page).locator('.acces__recap').innerText(), /Sam <img src=x onerror=alert\(1\)>/);
+    assert.equal(await page.locator('#moi button').innerText(), 'Demande envoyée');
+    assert.equal((await lignes(page)).length, (await lignes(page)).length);
+    aucuneErreur(page);
+  });
+
+  test('une demande déjà faite est rappelée, sans refaire le formulaire', async () => {
+    const page = await ouvrir({ requete: '?public&inconnu&demande-faite' });
+    await fenetre(page).waitFor();
+    assert.match(await fenetre(page).locator('h2').innerText(), /votre demande est enregistrée/);
+    assert.match(await fenetre(page).innerText(), /demande du \d+ \S+/);
+    assert.equal(await fenetre(page).locator('form').count(), 0);
+  });
+
+  test('si l\'envoi échoue, on le dit et la saisie est conservée', async () => {
+    const page = await ouvrir({ requete: '?public&inconnu&demande-refusee' });
+    await fenetre(page).waitFor();
+    await fenetre(page).locator('input[name="prenom"]').fill('Sam');
+    await fenetre(page).locator('input[name="nom"]').fill('Roux');
+    await fenetre(page).locator('input[name="etablissement"]').fill('Association locale');
+    await fenetre(page).getByRole('button', { name: 'Envoyer ma demande' }).click();
+    await attendre(async () => /n’a pas pu être enregistrée/.test(await fenetre(page).innerText()), { message: 'pas de message d\'erreur' });
+    assert.equal(await fenetre(page).locator('input[name="nom"]').inputValue(), 'Roux');
+    assert.equal(await fenetre(page).locator('input[name="etablissement"]').inputValue(), 'Association locale');
+  });
+
+  test('document où l\'Annuaire se lit (réglage actuel) : une personne connectée absente de l\'Annuaire a aussi le formulaire', async () => {
+    const page = await ouvrir({ requete: '?inconnu' });
+    await fenetre(page).waitFor();
+    assert.equal(await fenetre(page).locator('form').count(), 1);
+    assert.match(await page.locator(SEL.etat).innerText(), /quelquun@exemple\.org\) n’est pas dans la table « Annuaire »/);
+  });
+
+  test('la table des demandes manquante est créée par le widget ; sans droit de structure, pas de formulaire mais un message', async () => {
+    let page = await ouvrir({ requete: '?inconnu&sans-demandes' });
+    await fenetre(page).waitFor();
+    const creation = (await demandes(page)).find((a) => a[0] === 'AddTable');
+    assert.deepEqual(creation[2].map((c) => c.id), ['Nom', 'Prenom', 'Email_saisi', 'Etablissement']);
+    const colonnes = (await demandes(page)).filter((a) => a[0] === 'AddColumn');
+    assert.deepEqual(colonnes.map((a) => [a[2], a[3].formula, a[3].recalcWhen]), [['Email', 'user.Email', 0], ['Date', 'NOW()', 0]]);
+    assert.equal(await fenetre(page).locator('form').count(), 1);
+    page = await ouvrir({ requete: '?inconnu&sans-demandes&sans-droits' });
+    await fenetre(page).waitFor();
+    assert.equal(await fenetre(page).locator('form').count(), 0);
+    assert.match(await fenetre(page).innerText(), /Demandez à l’organisateur de vous ajouter/);
+  });
+
+  test('une personne reconnue ne voit aucune fenêtre et le widget ne touche pas à la table des demandes', async () => {
+    const page = await ouvrir();
+    await pause(500);
+    assert.equal(await page.locator('#acces[open]').count(), 0);
+    assert.deepEqual(await demandes(page), []);
+    assert.equal(await page.locator(SEL.nom).innerText(), 'Camille Martin');
+  });
+});

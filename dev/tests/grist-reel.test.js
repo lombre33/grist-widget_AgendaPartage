@@ -60,7 +60,8 @@ describe('vrai Grist', { skip: disponible ? false : `Grist ne répond pas sur ${
       throw new Error(`aucun événement affiché : ${(await widget.locator('body').innerText()).slice(0, 300)}`);
     });
     await attendre(() => widget.locator(SEL.pied).innerText().then((t) => t.includes('ligne')), { message: 'présences non reçues' });
-    await page.keyboard.press('Escape');   // ferme la visite guidée de Grist
+    await page.mainFrame().evaluate(() => { if (document.activeElement) document.activeElement.blur(); });   // le focus quitte le widget (sa fenêtre d'accès a pu le prendre) ...
+    await page.keyboard.press('Escape');   // ... pour que Échap ferme la visite guidée de Grist, et non la fenêtre du widget
     await pause(300);
     return { page, widget, contexte };
   }
@@ -438,33 +439,46 @@ describe('vrai Grist', { skip: disponible ? false : `Grist ne répond pas sur ${
   });
 
   describe('document ouvert à tout le monde, écriture réservée aux personnes de l\'Annuaire connectées', () => {
+    /** La fenêtre s'ouvre d'office au chargement ; le bouton de l'en-tête est aussi là pour la rouvrir. */
+    const fenetreAcces = async (widget) => {
+      await widget.locator('#acces[open]').waitFor({ timeout: 15000 });
+      assert.equal(await widget.locator('#moi button').count(), 1, 'bouton de l\'en-tête');
+    };
+
     /** Appel de l'API sans aucune connexion (personne anonyme). */
     const anonyme = async (methode, chemin, corps) => {
       const r = await fetch(`${GRIST}/api${chemin}`, { method: methode, headers: { 'X-Requested-With': 'XMLHttpRequest', ...(corps ? { 'Content-Type': 'application/json' } : {}) }, body: corps ? JSON.stringify(corps) : undefined });
       return r.status;
     };
 
-    test('une personne anonyme voit le planning et un message l\'invite à se connecter ; elle ne lit ni n\'écrit rien d\'autre', async () => {
+    test('une personne anonyme voit le planning et une fenêtre lui explique la connexion ; elle ne lit ni n\'écrit rien d\'autre', async () => {
       const doc = await nouveau({ publique: true });
       const { widget } = await ouvrir(null, doc);
       assert.equal(await widget.locator(SEL.evenement).count(), 30);
       assert.equal(await widget.locator('button[data-action="choisir"]').count(), 0, 'pas de boutons de choix');
+      await fenetreAcces(widget);
+      assert.match(await widget.locator('#acces h2').innerText(), /Connectez-vous pour participer/);
+      assert.match(await widget.locator('#acces').innerText(), /Choisissez ProConnect[\s\S]*même connexion que pour Resana/);
       assert.match(await widget.locator(SEL.etat).innerText(), /connectez-vous à Grist avec votre adresse professionnelle/);
       assert.equal(await widget.locator(SEL.etat).evaluate((e) => e.classList.contains('etat--erreur')), false, 'ce n\'est pas présenté comme une panne');
       assert.equal(await anonyme('GET', `/docs/${doc.doc}/tables/Annuaire/records`), 403, 'l\'Annuaire reste caché');
       assert.equal(await anonyme('GET', `/docs/${doc.doc}/tables/Evenements/records`), 200, 'le planning est public');
+      assert.equal(await anonyme('GET', `/docs/${doc.doc}/tables/Demandes_Annuaire/records`), 403, 'les demandes d\'ajout aussi');
       const lue = await (await fetch(`${GRIST}/api/docs/${doc.doc}/tables/Participations/records`, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })).json();
       assert.ok(lue.records.every((l) => !('Email' in l.fields) && !('Utilisateur' in l.fields)), 'ni e-mail ni personne dans Participations');
       assert.equal(await anonyme('POST', `/docs/${doc.doc}/apply`, [['AddRecord', 'Participations', null, { Statut: 'sur' }]]), 403);
+      assert.equal(await anonyme('POST', `/docs/${doc.doc}/apply`, [['AddRecord', 'Demandes_Annuaire', null, { Nom: 'x' }]]), 403, 'pas de demande sans être connecté');
       assert.equal(await anonyme('POST', `/docs/${doc.doc}/apply`, [['RemoveTable', 'Etablissement']]), 403);
       assert.equal(await anonyme('POST', `/docs/${doc.doc}/apply`, [['UpdateRecord', 'Evenements', 1, { Titre: 'x' }]]), 403);
       assert.equal((await participations(PROPRIO, doc)).length, 0, 'aucune ligne laissée');
+      assert.equal((await lignes(PROPRIO, doc.doc, 'Demandes_Annuaire')).length, 0, 'aucune ligne de sondage laissée');
     });
 
     test('une personne de l\'Annuaire qui n\'est pas partagée nommément se reconnaît, coche, et les autres la voient', async () => {
       const doc = await nouveau({ publique: true });
       const j = await ouvrir(JEANNE, doc);
       assert.equal(await j.widget.locator(SEL.nom).innerText(), 'Jeanne Delmas');
+      assert.equal(await j.widget.locator('#acces[open]').count(), 0, 'aucune fenêtre pour une personne reconnue');
       await carte(j.widget, 'Atelier Durable').locator(SEL.present).click();
       await attendre(async () => (await miennes(PROPRIO, doc, JEANNE)).length === 1);
       const k = await ouvrir(KARIM, doc);
@@ -476,17 +490,54 @@ describe('vrai Grist', { skip: disponible ? false : `Grist ne répond pas sur ${
       await assert.rejects(appliquer(JEANNE, doc.doc, [['AddRecord', 'Participations', null, { Email: KARIM, Evenement: evt, Statut: 'sur' }]]), /403/);
       await assert.rejects(appliquer(JEANNE, doc.doc, [['RemoveTable', 'Etablissement']]), /403/);
       await assert.rejects(appliquer(JEANNE, doc.doc, [['UpdateRecord', 'Evenements', 1, { Titre: 'x' }]]), /403/);
+      assert.equal((await lignes(PROPRIO, doc.doc, 'Demandes_Annuaire')).length, 0, 'le widget n\'écrit rien dans les demandes pour une personne reconnue');
     });
 
-    test('une personne connectée mais absente de l\'Annuaire voit le même message et n\'écrit rien', async () => {
+    test('une personne connectée mais absente de l\'Annuaire remplit le formulaire : sa demande est journalisée avec son e-mail de connexion', async () => {
       const doc = await nouveau({ publique: true });
-      const { widget } = await ouvrir(INCONNU, doc);
+      const { widget, page } = await ouvrir(INCONNU, doc);
       assert.equal(await widget.locator(SEL.evenement).count(), 30);
       assert.equal(await widget.locator('button[data-action="choisir"]').count(), 0);
-      assert.match(await widget.locator(SEL.etat).innerText(), /connectez-vous à Grist avec votre adresse professionnelle/);
+      await fenetreAcces(widget);
+      assert.match(await widget.locator('#acces').innerText(), /avec inconnu@exemple\.org/i);
+      assert.match(await widget.locator(SEL.etat).innerText(), /inconnu@exemple\.org\) n’est pas dans la table « Annuaire »/);
+      assert.equal(await widget.locator('#acces input[name="emailSaisi"]').inputValue(), INCONNU);
+      assert.equal((await lignes(PROPRIO, doc.doc, 'Demandes_Annuaire')).length, 0, 'la ligne de sondage a été supprimée');
+      await widget.locator('#acces input[name="prenom"]').fill('Sam');
+      await widget.locator('#acces input[name="nom"]').fill('Roux');
+      await widget.locator('#acces input[name="emailSaisi"]').fill('sam.roux@association.example');
+      await widget.locator('#acces input[name="etablissement"]').fill('Association locale');
+      await widget.locator('#acces').getByRole('button', { name: 'Envoyer ma demande' }).click();
+      await attendre(async () => /votre demande est enregistrée/.test(await widget.locator('#acces h2').innerText()), { message: 'pas de confirmation' });
+      const [demande] = await lignes(PROPRIO, doc.doc, 'Demandes_Annuaire');
+      assert.equal(demande.Nom, 'Roux');
+      assert.equal(demande.Prenom, 'Sam');
+      assert.equal(demande.Email_saisi, 'sam.roux@association.example');
+      assert.equal(demande.Etablissement, 'Association locale');
+      assert.equal(demande.Email, INCONNU, 'e-mail de connexion ajouté par Grist');
+      assert.ok(Math.abs(demande.Date - Date.now() / 1000) < 600, 'date ajoutée par Grist');
+      assert.equal((await participations(PROPRIO, doc)).length, 0, 'rien dans Participations');
+      // en revenant, elle retrouve sa demande au lieu du formulaire ; les autres ne la lisent pas ; l'Annuaire n'a pas bougé
+      await page.context().close();
+      const encore = await ouvrir(INCONNU, doc);
+      await fenetreAcces(encore.widget);
+      assert.match(await encore.widget.locator('#acces h2').innerText(), /votre demande est enregistrée/);
+      assert.equal(await encore.widget.locator('#acces form').count(), 0);
+      assert.equal((await lignes(JEANNE, doc.doc, 'Demandes_Annuaire').catch(() => [])).length, 0, 'une autre personne ne lit pas les demandes');
+      assert.equal((await lignes(PROPRIO, doc.doc, 'Annuaire')).length, 7, 'l\'Annuaire n\'a pas bougé');
+      // elle ne peut pas se faire passer pour une autre en écrivant l'e-mail de connexion, ni modifier sa demande
+      await assert.rejects(appliquer(INCONNU, doc.doc, [['AddRecord', 'Demandes_Annuaire', null, { Nom: 'x', Email: JEANNE }]]), /403/);
+      await assert.rejects(appliquer(INCONNU, doc.doc, [['UpdateRecord', 'Demandes_Annuaire', demande.id, { Nom: 'y' }]]), /403/);
       await assert.rejects(appliquer(INCONNU, doc.doc, [['AddRecord', 'Participations', null, { Statut: 'sur' }]]), /403/);
       await assert.rejects(lignes(INCONNU, doc.doc, 'Annuaire'), /403/);
-      assert.equal((await participations(PROPRIO, doc)).length, 0, 'aucune ligne laissée');
+    });
+
+    test('une table ajoutée plus tard est fermée aux personnes hors Annuaire d\'office', async () => {
+      const doc = await nouveau({ publique: true });
+      await appliquer(PROPRIO, doc.doc, [['AddTable', 'Brouillon', [{ id: 'A', type: 'Text', isFormula: false }]], ['AddRecord', 'Brouillon', null, { A: 'secret' }]]);
+      assert.equal(await anonyme('GET', `/docs/${doc.doc}/tables/Brouillon/records`), 403);
+      await assert.rejects(lignes(INCONNU, doc.doc, 'Brouillon'), /403/);
+      assert.equal((await lignes(JEANNE, doc.doc, 'Brouillon')).length, 1, 'une personne de l\'Annuaire la lit');
     });
   });
 

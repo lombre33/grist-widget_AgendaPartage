@@ -144,8 +144,8 @@ module.exports.installerReglesRecommandees = installerReglesRecommandees;
  * `user.acl.id == 0` ne convient pas : l'identifiant vaut None quand aucune ligne ne correspond.
  */
 async function installerReglesPartagePublic(doc) {
-  const [defaut, colonnes, annuaire, etablissement, evenements, participations] = await appliquer(PROPRIETAIRE, doc, [['*', '*'], ['Participations', 'Email,Utilisateur'], ['Annuaire', '*'],
-    ['Etablissement', '*'], ['Evenements', '*'], ['Participations', '*']].map(([tableId, colIds]) => ['AddRecord', '_grist_ACLResources', null, { tableId, colIds }]));
+  const [defaut, colonnes, annuaire, etablissement, evenements, participations, demandes] = await appliquer(PROPRIETAIRE, doc, [['*', '*'], ['Participations', 'Email,Utilisateur'], ['Annuaire', '*'],
+    ['Etablissement', '*'], ['Evenements', '*'], ['Participations', '*'], ['Demandes_Annuaire', '*']].map(([tableId, colIds]) => ['AddRecord', '_grist_ACLResources', null, { tableId, colIds }]));
   const regle = (resource, aclFormula, permissionsText, memo = '') => ({ resource, aclFormula, permissionsText, memo });
   const horsAnnuaire = 'user.Access not in [OWNER] and not user.acl.id';
   const rules = [
@@ -160,6 +160,13 @@ async function installerReglesPartagePublic(doc) {
     regle(participations, 'rec.Email == user.Email', '+D'),
     regle(participations, 'newRec.Email == user.Email', '+C'),
     regle(participations, '', '+R-U-C-D'),
+    // Demandes d'ajout : une personne connectée écrit ses propres demandes (son e-mail de connexion, ajouté par Grist) et ne lit que les siennes
+    regle(demandes, 'user.Access in [OWNER]', '+R+U+C+D'),
+    regle(demandes, 'user.IsLoggedIn and newRec.Email == user.Email', '+C'),
+    regle(demandes, 'user.IsLoggedIn and rec.Email == user.Email', '+R+D'),
+    regle(demandes, '', '-R-U-C-D'),
+    // Toute autre table (par exemple une table ajoutée plus tard) : fermée à qui n'est pas dans l'Annuaire
+    regle(defaut, horsAnnuaire, '-R-U-C-D'),
     regle(defaut, 'user.Access != OWNER', '-S'),   // « Autoriser les éditeurs à modifier la structure » décoché
   ].map((r, i) => ({ ...r, rulePos: i + 1 }));
   await appliquer(PROPRIETAIRE, doc, rules.map((r) => ['AddRecord', '_grist_ACLRules', null, r]));

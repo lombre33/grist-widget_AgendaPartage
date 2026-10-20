@@ -53,6 +53,16 @@ const CONFIG = {
     domaine: 'nom_de_domaine',
     logo: 'Logo',                        // colonne Pièces jointes, ou lien web (https://…)
   },
+  // Table des demandes d’ajout à l’Annuaire : une personne connectée mais absente de l’Annuaire y laisse ses coordonnées.
+  // Le widget la crée lui-même (par une personne qui peut modifier la structure) ; « Email » et « Date » sont calculées à la création de la ligne.
+  demandes: {
+    table: 'Demandes_Annuaire',
+    nom: 'Nom', prenom: 'Prenom', emailSaisi: 'Email_saisi', etablissement: 'Etablissement',
+    email: 'Email',                      // formule « à la création » : user.Email, l’e-mail de connexion
+    date: 'Date',                        // formule « à la création » : NOW()
+  },
+  // Fenêtre « Connectez-vous pour participer » : le service de connexion et le service que les gens connaissent déjà.
+  connexion: { service: 'ProConnect', reference: 'Resana' },
   // Les événements, l’Annuaire et les logos changent rarement : on les relit à cet intervalle
   // (les présences, elles, arrivent en direct).
   rafraichissementMs: 60000,
@@ -110,6 +120,16 @@ const etat = {
   infos: new Set(),            // evenements dont les informations pratiques sont dépliées
   toutVoir: new Set(),         // evenements dont la longue liste des participants est affichée en entier
   jeton: null,                 // { token, baseUrl, expire } pour les logos en pièce jointe
+  annuaireRefuse: false,       // l’Annuaire est fermé à cette personne par les règles d’accès (document ouvert à tous)
+  acces: '',                   // pourquoi la personne ne peut pas cocher : 'anonyme' (pas connectée) ou 'hors_annuaire' (connectée, absente de l’Annuaire)
+  emailConnexion: '',          // son e-mail de connexion, quand on le connaît
+  demandesDisponibles: false,  // la table des demandes d’ajout existe et cette personne peut y écrire
+  demande: null,               // sa demande déjà enregistrée : { nom, prenom, emailSaisi, etablissement, date }
+  demandeEnCours: false,       // envoi de la demande en cours
+  erreurDemande: '',
+  brouillon: null,             // ce qu’elle a saisi (pour ne pas le perdre si l’envoi échoue)
+  accesPropose: false,         // la fenêtre a déjà été montrée d’office
+  accesOuvert: false,          // la fenêtre est demandée
 };
 
 const el = (id) => document.getElementById(id);
@@ -424,12 +444,15 @@ async function preparerParticipations() {
   await identifierParConnexion(existante);
 }
 
+const messageHorsAnnuaire = (email = etat.emailConnexion) =>
+  `Votre adresse de connexion (${email}) n’est pas dans la table « ${CONFIG.tables.annuaire} » : demandez à y être ajouté(e) pour indiquer votre présence.`;
+
 /** Qui suis-je, parmi les personnes de l’Annuaire ? D’abord par l’e-mail de connexion, sinon (repli) par l’e-mail lisible. */
 function identifierMoi() {
   const definir = (p, logo) => { etat.moi = { id: p.id, nom: p.nom, prenom: p.prenom, logo }; etat.messageMoi = ''; };
   if (etat.erreurAnnuaire) {
     etat.moi = null;
-    etat.messageMoi = etat.erreurAnnuaire;
+    etat.messageMoi = etat.acces === 'hors_annuaire' ? messageHorsAnnuaire() : etat.erreurAnnuaire;
     return undefined;
   }
   const connexion = etat.connexion;
@@ -437,7 +460,7 @@ function identifierMoi() {
     const p = etat.annuaire.find((x) => x.id === connexion.personne);
     if (p) return definir(p, trouverLogo(p));
     etat.moi = null;
-    etat.messageMoi = `Votre adresse de connexion (${connexion.email}) n’est pas dans la table « ${CONFIG.tables.annuaire} » : demandez à y être ajouté(e) pour indiquer votre présence.`;
+    etat.messageMoi = messageHorsAnnuaire(connexion.email);
     return undefined;
   }
   // Repli : une règle d’accès peut réserver la colonne e-mail de l’Annuaire à sa propre ligne
@@ -496,6 +519,7 @@ async function chargerAnnuaire() {
     console.error(err);
     if (etat.pret) return;   // panne passagère : on garde ce qui est affiché
     etat.annuaire = [];
+    etat.annuaireRefuse = MOTIF_REFUS.test(texte(err && err.message));
     etat.erreurAnnuaire = `Table « ${CONFIG.tables.annuaire} » inaccessible : identification impossible.`;
   }
   appliquerDonnees();
@@ -901,7 +925,9 @@ function rendreEntete() {
     zone.innerHTML = `${rendreAvatar({ ...etat.moi, statut: 'sur' })}<span>${echapper(nomComplet(etat.moi) || 'Connecté(e)')}</span>`;
   } else {
     zone.className = 'entete__moi moi moi--lecture';
-    zone.textContent = 'Lecture seule';
+    if (etat.acces) {   // la fenêtre d’explication peut être rouverte
+      zone.innerHTML = `<button type="button" class="moi__bouton" data-action="acces" data-focus="acces">${etat.acces === 'anonyme' ? 'Se connecter pour participer' : etat.demande ? 'Demande envoyée' : 'Demander mon ajout'}</button>`;
+    } else zone.textContent = 'Lecture seule';
   }
   const nb = etat.evenements.filter((e) => monStatut(e.id)).length;
   const filtre = el('filtre');
@@ -960,6 +986,7 @@ function rendre() {
   const utilisees = ciblesUtilisees();
   choisis = new Set([...etat.cibles].filter((code) => utilisees.some((c) => c.code === code)));
   rendreEntete();
+  rendreAcces();
   rendreCibles(utilisees);
   rendreOnglets(jours);
   rendrePlanning(jours);
@@ -968,6 +995,227 @@ function rendre() {
     cible.focus({ preventScroll: true });
     etat.focus = null;
   }
+}
+
+/* ----------------------------------------------------------------------------
+   Accès : connexion des personnes anonymes, demande d’ajout des personnes absentes de l’Annuaire
+   Avec un document ouvert à tout le monde, les règles d’accès ferment l’Annuaire et l’écriture dans Participations
+   à qui n’y figure pas. Le widget distingue alors deux cas et l’explique dans une fenêtre :
+   - la personne n’est pas connectée à Grist : comment se connecter ;
+   - elle est connectée mais absente de l’Annuaire : un formulaire (nom, prénom, e-mail, établissement) qui l’inscrit
+     dans la table des demandes, pour que l’organisateur l’ajoute.
+   ---------------------------------------------------------------------------- */
+// Les messages d’erreur de Grist quand une règle d’accès refuse une lecture ou une écriture.
+const MOTIF_REFUS = /blocked by|access rules|denied|forbidden|permission|\b403\b/i;
+
+/** Crée la table des demandes si elle n’existe pas encore (seule une personne qui peut modifier la structure y arrive). */
+async function preparerDemandes() {
+  const d = CONFIG.demandes;
+  try {
+    await grist.docApi.fetchTable(d.table);
+    return;
+  } catch (err) {
+    if (MOTIF_REFUS.test(texte(err && err.message))) return;   // elle existe, mais cette personne ne peut pas la lire
+  }
+  try {
+    const { retValues = [] } = (await grist.docApi.applyUserActions([
+      ['AddTable', d.table, [d.nom, d.prenom, d.emailSaisi, d.etablissement].map((id) => ({ id, type: 'Text', isFormula: false }))],
+      ['AddColumn', d.table, d.email, { type: 'Text', isFormula: false, formula: 'user.Email', recalcWhen: 0, label: 'E-mail de connexion' }],
+      ['AddColumn', d.table, d.date, { type: 'DateTime:Europe/Paris', isFormula: false, formula: 'NOW()', recalcWhen: 0, label: 'Date de la demande' }],
+    ])) || {};
+    const creee = retValues[0] && retValues[0].table_id;
+    if (creee && creee !== d.table) {   // Grist l’a renommée : elle existait déjà sans que le widget la voie
+      console.warn(`Table « ${d.table} » déjà existante mais invisible pour cette personne : doublon retiré`);
+      await grist.docApi.applyUserActions([['RemoveTable', creee]]);
+    }
+  } catch (err) {
+    console.warn(`Création de la table « ${d.table} » impossible`, err);
+  }
+}
+
+/**
+ * Cette personne est-elle connectée à Grist ? Une ligne éphémère dans la table des demandes donne son e-mail de connexion
+ * (formule « à la création ») ; Grist la refuse aux personnes anonymes. La ligne est supprimée aussitôt.
+ */
+async function sonderConnexion() {
+  const d = CONFIG.demandes;
+  let id = null;
+  try {
+    id = (await grist.docApi.applyUserActions([['AddRecord', d.table, null, {}]])).retValues[0];
+    const lues = await grist.docApi.fetchTable(d.table);
+    const i = lues.id.indexOf(id);
+    return i < 0 ? '' : texte(lues[d.email][i]);
+  } finally {
+    if (id != null) await grist.docApi.applyUserActions([['RemoveRecord', d.table, id]]).catch((err) => console.warn('Ligne de sondage non supprimée', err));
+  }
+}
+
+/** Sa demande d’ajout déjà enregistrée, s’il y en a une (les règles ne lui montrent que les siennes). */
+async function lireMaDemande() {
+  const d = CONFIG.demandes;
+  try {
+    const lignes = lignesDeTable(await grist.docApi.fetchTable(d.table))
+      .filter((l) => texte(l[d.email]).toLowerCase() === etat.emailConnexion.toLowerCase() && (texte(l[d.nom]) || texte(l[d.prenom])));
+    etat.demandesDisponibles = true;
+    const l = lignes[lignes.length - 1];
+    etat.demande = l ? { nom: texte(l[d.nom]), prenom: texte(l[d.prenom]), emailSaisi: texte(l[d.emailSaisi]), etablissement: texte(l[d.etablissement]), date: Number(l[d.date]) || 0 } : null;
+  } catch (err) {
+    console.warn(`Table « ${d.table} » illisible : pas de formulaire de demande`, err);
+    etat.demandesDisponibles = false;
+  }
+}
+
+/** Qui est cette personne qui n’est pas reconnue ? Renseigne `etat.acces` ('anonyme', 'hors_annuaire' ou '' si on ne sait pas). */
+async function verifierAcces() {
+  etat.acces = '';
+  if (etat.moi) return;
+  try {
+    if (etat.connexion && etat.connexion.email && !etat.erreurAnnuaire) etat.emailConnexion = etat.connexion.email;   // l’Annuaire se lit : c’est son adresse qui y manque
+    else if (etat.annuaireRefuse) etat.emailConnexion = await sonderConnexion();                                      // l’Annuaire lui est fermé : est-elle connectée ?
+  } catch (err) {
+    if (MOTIF_REFUS.test(texte(err && err.message))) etat.acces = 'anonyme';
+    else console.warn('Sondage de la connexion impossible', err);
+    return;
+  }
+  if (!etat.emailConnexion) return;
+  etat.acces = 'hors_annuaire';
+  await lireMaDemande();
+  identifierMoi();   // le message sous l’en-tête dépend de ce qu’on vient d’apprendre
+}
+
+/** Les trois étapes de la connexion, dessinées (pas de capture : elle dépendrait de l’habillage de Grist). */
+const ILLUSTRATIONS = {
+  bouton: `<svg viewBox="0 0 320 120" role="img" aria-label="Page Grist : le bouton « Se connecter » est en haut à droite">
+    <rect x="1" y="1" width="318" height="118" rx="10" fill="#fff" stroke="#e5dce3" stroke-width="2"/>
+    <path d="M1 11a10 10 0 0 1 10-10h298a10 10 0 0 1 10 10v24H1z" fill="#f4f0f3"/>
+    <rect x="14" y="13" width="60" height="9" rx="4.5" fill="#d9cfd7"/><rect x="82" y="13" width="40" height="9" rx="4.5" fill="#e8e0e6"/>
+    <rect x="218" y="8" width="90" height="22" rx="11" fill="#b9348b"/>
+    <text x="263" y="23" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" font-weight="700" fill="#fff">Se connecter</text>
+    <rect x="213" y="3" width="100" height="32" rx="16" fill="none" stroke="#ffcc00" stroke-width="3.5"/>
+    <path d="M150 78C190 78 232 66 256 44" fill="none" stroke="#3b1c13" stroke-width="3" stroke-linecap="round"/>
+    <path d="M247 43l10-1-3 10" fill="none" stroke="#3b1c13" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="22" y="84" font-family="Georgia, serif" font-size="13" fill="#3b1c13">En haut à droite</text>
+    <rect x="22" y="96" width="190" height="8" rx="4" fill="#efe9ee"/>
+  </svg>`,
+  service: `<svg viewBox="0 0 320 120" role="img" aria-label="Page de connexion : le bouton « S’identifier avec ProConnect »">
+    <rect x="1" y="1" width="318" height="118" rx="10" fill="#fff" stroke="#e5dce3" stroke-width="2"/>
+    <text x="160" y="30" text-anchor="middle" font-family="Georgia, serif" font-size="14" font-weight="700" fill="#3b1c13">Connexion</text>
+    <rect x="42" y="44" width="236" height="38" rx="6" fill="#000091"/>
+    <text x="160" y="68" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" font-weight="700" fill="#fff">S’identifier avec __SERVICE__</text>
+    <rect x="37" y="39" width="246" height="48" rx="10" fill="none" stroke="#ffcc00" stroke-width="3.5"/>
+    <text x="160" y="106" text-anchor="middle" font-family="Georgia, serif" font-size="11" fill="#615961">Comme pour __REFERENCE__</text>
+  </svg>`,
+  cocher: `<svg viewBox="0 0 320 120" role="img" aria-label="Le planning vous reconnaît : les boutons « Présent » et « À confirmer » apparaissent">
+    <rect x="1" y="1" width="318" height="118" rx="10" fill="#fff" stroke="#e5dce3" stroke-width="2"/>
+    <rect x="16" y="16" width="170" height="11" rx="5.5" fill="#3b1c13"/><rect x="16" y="34" width="120" height="8" rx="4" fill="#d9cfd7"/>
+    <rect x="16" y="54" width="130" height="8" rx="4" fill="#efe9ee"/>
+    <rect x="16" y="78" width="130" height="28" rx="14" fill="#b9348b"/>
+    <text x="81" y="97" text-anchor="middle" font-family="Georgia, serif" font-size="13" font-weight="700" fill="#fff">✓ Présent</text>
+    <rect x="160" y="78" width="130" height="28" rx="14" fill="#fff" stroke="#b9348b" stroke-width="2"/>
+    <text x="225" y="97" text-anchor="middle" font-family="Georgia, serif" font-size="13" font-weight="700" fill="#b9348b">? À confirmer</text>
+    <rect x="11" y="73" width="140" height="38" rx="19" fill="none" stroke="#ffcc00" stroke-width="3.5"/>
+  </svg>`,
+};
+
+function dateLongue(secondes) {
+  if (!secondes) return '';
+  const d = new Date(secondes * 1000);
+  return `${d.getDate()} ${MOIS[d.getMonth()]}`;
+}
+
+/** Fenêtre pour une personne qui n’est pas connectée : comment se connecter, en trois étapes. */
+function contenuConnexion() {
+  const { service, reference } = CONFIG.connexion;
+  const etapes = [
+    ['bouton', 'Cliquez sur « Se connecter »', 'Le bouton se trouve en haut à droite de cette page.'],
+    ['service', `Choisissez ${echapper(service)}`, `C’est la même connexion que pour ${echapper(reference)} : vos identifiants professionnels habituels.`],
+    ['cocher', 'Revenez ici et cochez', 'Le planning vous reconnaît : choisissez « Présent » ou « À confirmer » pour chaque événement.'],
+  ];
+  return `
+    <p class="acces__sur">Planning en lecture seule</p>
+    <h2 id="acces-titre">Connectez-vous pour participer</h2>
+    <p class="acces__intro">Le planning est ouvert à tous. Pour indiquer les événements où vous serez, identifiez-vous : c’est rapide et il n’y a aucun compte à créer.</p>
+    <ol class="acces__etapes">${etapes.map(([cle, titre, detail], i) => `
+      <li><span class="acces__num" aria-hidden="true">${i + 1}</span>
+        <div class="acces__texte"><h3>${titre}</h3><p>${detail}</p></div>
+        <figure>${ILLUSTRATIONS[cle].replace('__SERVICE__', echapper(service)).replace('__REFERENCE__', echapper(reference))}</figure></li>`).join('')}
+    </ol>
+    <p class="acces__note">Votre adresse professionnelle doit figurer dans l’annuaire du pôle. Si ce n’est pas le cas, un formulaire vous permettra de demander votre ajout.</p>
+    <div class="acces__actions"><button type="button" class="acces__bouton" data-action="fermer-acces">J’ai compris</button></div>`;
+}
+
+/** Fenêtre pour une personne connectée mais absente de l’Annuaire : sa demande est enregistrée, ou le formulaire pour la faire. */
+function contenuDemande() {
+  const connecte = etat.emailConnexion ? `<p class="acces__sur">Connecté(e) avec <span class="acces__mail">${echapper(etat.emailConnexion)}</span></p>` : '';
+  const fermer = '<div class="acces__actions"><button type="button" class="acces__bouton" data-action="fermer-acces">Fermer</button></div>';
+  if (etat.demande) {
+    const quand = dateLongue(etat.demande.date);
+    return `${connecte}
+      <h2 id="acces-titre">Merci, votre demande est enregistrée</h2>
+      <p class="acces__intro">Nous vous ajoutons à l’annuaire dès que possible${quand ? ` (demande du ${quand})` : ''}. Revenez ensuite sur cette page : vous pourrez indiquer vos présences.</p>
+      <dl class="acces__recap"><dt>Nom</dt><dd>${echapper(`${etat.demande.prenom} ${etat.demande.nom}`)}</dd><dt>E-mail</dt><dd>${echapper(etat.demande.emailSaisi)}</dd><dt>Établissement</dt><dd>${echapper(etat.demande.etablissement)}</dd></dl>
+      ${fermer}`;
+  }
+  if (!etat.demandesDisponibles) {
+    return `${connecte}
+      <h2 id="acces-titre">Vous n’êtes pas encore dans l’annuaire</h2>
+      <p class="acces__intro">Demandez à l’organisateur de vous ajouter à l’annuaire pour indiquer vos présences.</p>
+      ${fermer}`;
+  }
+  const b = etat.brouillon || {};
+  const champ = (nom, libelle, valeur, extra = '') => `<label class="acces__champ"><span>${libelle}</span><input name="${nom}" value="${echapper(valeur)}" required maxlength="200" ${extra}></label>`;
+  return `${connecte}
+    <h2 id="acces-titre">Vous n’êtes pas encore dans l’annuaire</h2>
+    <p class="acces__intro">Dites-nous qui vous êtes : nous vous ajoutons rapidement et vous pourrez alors indiquer vos présences.</p>
+    <form id="acces-form" class="acces__form">
+      <div class="acces__duo">${champ('prenom', 'Prénom', b.prenom || '', 'autocomplete="given-name"')}${champ('nom', 'Nom', b.nom || '', 'autocomplete="family-name"')}</div>
+      ${champ('emailSaisi', 'E-mail', b.emailSaisi || etat.emailConnexion, 'type="email" autocomplete="email"')}
+      ${champ('etablissement', 'Établissement', b.etablissement || '', 'list="acces-etablissements" autocomplete="organization"')}
+      <datalist id="acces-etablissements">${etat.etablissements.map((e) => texte(e[CONFIG.etablissements.nom])).filter(Boolean).map((nom) => `<option value="${echapper(nom)}">`).join('')}</datalist>
+      ${etat.erreurDemande ? `<p class="acces__erreur" role="alert">${echapper(etat.erreurDemande)}</p>` : ''}
+      <div class="acces__actions">
+        <button type="button" class="acces__lien" data-action="fermer-acces">Plus tard</button>
+        <button type="submit" class="acces__bouton"${etat.demandeEnCours ? ' disabled' : ''}>${etat.demandeEnCours ? 'Envoi…' : 'Envoyer ma demande'}</button>
+      </div>
+    </form>`;
+}
+
+/** Enregistre la demande d’ajout dans la table des demandes (l’e-mail de connexion et la date sont ajoutés par Grist). */
+async function envoyerDemande(valeurs) {
+  const d = CONFIG.demandes;
+  etat.brouillon = valeurs;
+  etat.demandeEnCours = true;
+  etat.erreurDemande = '';
+  rendre();
+  try {
+    await grist.docApi.applyUserActions([['AddRecord', d.table, null, {
+      [d.nom]: valeurs.nom, [d.prenom]: valeurs.prenom, [d.emailSaisi]: valeurs.emailSaisi, [d.etablissement]: valeurs.etablissement,
+    }]]);
+    etat.demande = { ...valeurs, date: Math.floor(Date.now() / 1000) };
+  } catch (err) {
+    console.error('Demande d’ajout non enregistrée', err);
+    etat.erreurDemande = 'Votre demande n’a pas pu être enregistrée. Réessayez dans un instant ou prévenez l’organisateur.';
+  }
+  etat.demandeEnCours = false;
+  rendre();
+}
+
+/** La fenêtre : montrée d’office une fois, puis à la demande (bouton de l’en-tête). Son contenu n’est refait que si l’état change (la saisie est préservée). */
+function rendreAcces() {
+  const fenetre = el('acces');
+  if (!fenetre) return;
+  if (!etat.acces) {
+    if (fenetre.open) fenetre.close();
+    return;
+  }
+  if (!etat.accesPropose) { etat.accesPropose = true; etat.accesOuvert = true; }
+  const cle = [etat.acces, Boolean(etat.demande), etat.demandesDisponibles, etat.demandeEnCours, etat.erreurDemande, etat.etablissements.length].join('|');
+  if (fenetre.dataset.cle !== cle) {
+    fenetre.dataset.cle = cle;
+    fenetre.innerHTML = `<div class="acces__corps" tabindex="-1" autofocus>${etat.acces === 'anonyme' ? contenuConnexion() : contenuDemande()}</div>`;
+  }
+  if (etat.accesOuvert && !fenetre.open && typeof fenetre.showModal === 'function') fenetre.showModal();
+  else if (!etat.accesOuvert && fenetre.open) fenetre.close();
 }
 
 /* ----------------------------------------------------------------------------
@@ -996,9 +1244,26 @@ document.addEventListener('click', (ev) => {
   } else if (cible.dataset.action === 'choisir') {
     choisir(Number(cible.dataset.evt), cible.dataset.valeur);
     return;
+  } else if (cible.dataset.action === 'acces' || cible.dataset.action === 'fermer-acces') {
+    etat.accesOuvert = cible.dataset.action === 'acces';
   }
   rendre();
 });
+
+// Fenêtre d’accès : Échap ou un clic à côté la ferme (sans la rouvrir à l’affichage suivant) ; le formulaire envoie la demande.
+const fenetreAcces = el('acces');
+if (fenetreAcces) {
+  fenetreAcces.addEventListener('close', () => { etat.accesOuvert = false; });
+  fenetreAcces.addEventListener('click', (ev) => { if (ev.target === fenetreAcces) fenetreAcces.close(); });
+  fenetreAcces.addEventListener('submit', (ev) => {
+    ev.preventDefault();
+    if (etat.demandeEnCours) return;
+    const donnees = Object.fromEntries(new FormData(ev.target));
+    const valeurs = Object.fromEntries(['prenom', 'nom', 'emailSaisi', 'etablissement'].map((nom) => [nom, texte(donnees[nom]).replace(/\s+/g, ' ').slice(0, 200)]));
+    if (Object.values(valeurs).some((v) => !v)) return;
+    envoyerDemande(valeurs);
+  });
+}
 
 el('toast').addEventListener('click', () => { el('toast').hidden = true; });
 
@@ -1025,8 +1290,9 @@ if (typeof grist === 'undefined' || (window.self === window.top && !grist.simule
   grist.ready({ requiredAccess: 'full' });
   grist.onRecords(recevoirPresences, { includeColumns: 'all' });
   (async () => {
-    await Promise.all([chargerEvenements(), chargerEtablissements(), preparerParticipations()]);
+    await Promise.all([chargerEvenements(), chargerEtablissements(), preparerParticipations(), preparerDemandes()]);
     await chargerAnnuaire();
+    await verifierAcces();
     etat.pret = true;
     rendre();
     setInterval(() => { chargerEvenements(); chargerEtablissements(); chargerAnnuaire(); }, CONFIG.rafraichissementMs);

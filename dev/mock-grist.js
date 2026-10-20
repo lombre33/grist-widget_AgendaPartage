@@ -10,6 +10,11 @@
                     ?ambigu         tous les e-mails de l'Annuaire sont lisibles (cas réel) : la connexion seule doit suffire
                     ?anonyme        personne non connectée à Grist (e-mail de connexion vide, aucun e-mail lisible)
                     ?inconnu        connecté avec une adresse absente de l'Annuaire
+                    ?public         document ouvert à tout le monde : l'Annuaire et l'écriture dans Participations sont fermés à qui n'y figure pas
+                                    (à combiner avec ?anonyme ou ?inconnu) ; il reste la table des demandes d'ajout
+                    ?sans-demandes  la table Demandes_Annuaire n'existe pas encore (le widget la crée) ; avec ?sans-droits il n'y arrive pas
+                    ?demande-refusee  l'enregistrement d'une demande d'ajout échoue
+                    ?demande-faite  la personne a déjà fait sa demande d'ajout
                     ?sans-declencheur  la formule « à la création » (user.Email) ne donne rien : le widget se rabat sur l'e-mail lisible
                     ?declencheur-casse  Email et Utilisateur existent déjà mais ont été créées avec recalcWhen 1 (jamais calculées) : le widget doit les recréer
                     ?sans-ajout     les règles d'accès interdisent d'ajouter une ligne dans Participations
@@ -101,6 +106,14 @@
   // Doublons : deux lignes à mon nom pour un même événement (un double clic d'une ancienne version)
   if (tout && params.has('doublons')) for (const statut of ['à confirmer', 'présent']) ajouterPresence(moiId, 3, statut);
 
+  // --- Demandes d'ajout à l'Annuaire : la personne ne voit que les siennes (comme les règles recommandées du README) ---------
+  let demandeCreee = !params.has('sans-demandes');
+  let demandes = [];
+  let prochaineDemande = 1;
+  if (params.has('demande-faite')) demandes.push({ id: prochaineDemande++, Nom: 'Quelquun', Prenom: 'Un', Email_saisi: 'quelquun@exemple.org', Etablissement: 'Association locale', Email: emailConnecte, Date: 1792400000 });
+  // Document ouvert à tout le monde : qui n'est pas dans l'Annuaire n'y lit rien et n'écrit pas dans Participations
+  const fermeAuxInconnus = () => params.has('public') && !(ANNUAIRE.find((p) => emailConnecte && p.email.toLowerCase() === emailConnecte.toLowerCase()));
+
   // --- Ce que Grist renvoie pour l'Annuaire selon les règles d'accès --------------------------
   function annuaireVisible() {
     if (params.has('restreint')) return [parId(moiId)];
@@ -119,7 +132,7 @@
   let rappel = null;
   // Dans onRecords (contrairement à fetchTable), Grist rend une référence sous la forme { tableId, rowId }
   const reference = (tableId, rowId) => (rowId ? { tableId, rowId } : 0);
-  const enregistrements = () => participations.map((l) => ({ ...l, Utilisateur: reference('Annuaire', l.Utilisateur), Evenement: reference('Evenements', l.Evenement) }));
+  const enregistrements = () => participations.map(({ ...l }) => (fermeAuxInconnus() ? (delete l.Email, delete l.Utilisateur, l) : l)).map((l) => ({ ...l, Utilisateur: reference('Annuaire', l.Utilisateur), Evenement: reference('Evenements', l.Evenement) }));
   const notifier = () => setTimeout(() => rappel && rappel(enregistrements(), null), 120);
   const estMienne = (ligne) => (ligne.Email || '').toLowerCase() === emailConnecte.toLowerCase();
 
@@ -142,9 +155,14 @@
           if (params.has('sans-personnels')) t.Cibles = t.Cibles.map((v) => { const l = (v || []).slice(1).filter((x) => x !== 'Personnels'); return l.length ? ['L', ...l] : null; });
           return t;
         }
+        if (nom === 'Annuaire' && fermeAuxInconnus()) throw new Error('Blocked by table read access rules');
+        if (nom === 'Demandes_Annuaire') {
+          if (!demandeCreee) throw new Error(`Table inconnue : ${nom}`);
+          return enColonnes(demandes.filter((l) => emailConnecte && l.Email === emailConnecte), ['id', 'Nom', 'Prenom', 'Email_saisi', 'Etablissement', 'Email', 'Date']);
+        }
         if (nom === 'Annuaire') return enColonnes(annuaireVisible(), ['id', 'prenom', 'nom', 'email', 'Etablissement', 'nom_de_domaine']);
         if (nom === 'Etablissement') return enColonnes(ETABLISSEMENTS);
-        if (nom === 'Participations') return enColonnes(participations, ['id', ...colonnesParticipations]);
+        if (nom === 'Participations') return enColonnes(participations, ['id', ...colonnesParticipations.filter((c) => !(fermeAuxInconnus() && ['Email', 'Utilisateur'].includes(c)))]);
         throw new Error(`Table inconnue : ${nom}`);
       },
       async applyUserActions(actions) {
@@ -154,8 +172,25 @@
         for (const [type, table, ...args] of actions) {
           retValues.push(null);
           if (table === 'Annuaire') throw new Error('Le widget ne doit pas écrire dans l’Annuaire (attribut utilisateur : rechargement du document)');
+          if (table === 'Demandes_Annuaire') {
+            if (type === 'AddTable') {
+              if (params.has('sans-droits')) throw new Error('Blocked by table structure access rules');
+              demandeCreee = true;
+              retValues[retValues.length - 1] = { table_id: 'Demandes_Annuaire' };
+            } else if (type === 'AddRecord') {
+              const valeurs = args[1] || {};
+              if (!demandeCreee) throw new Error(`Table inconnue : ${table}`);
+              if (!emailConnecte || params.has('demande-refusee') && valeurs.Nom) throw new Error('Blocked by table create access rules');
+              const ligne = { id: prochaineDemande++, Email: emailConnecte, Date: Math.floor(Date.now() / 1000), ...valeurs };
+              demandes.push(ligne);
+              retValues[retValues.length - 1] = ligne.id;
+            } else if (type === 'RemoveRecord') {
+              demandes = demandes.filter((l) => l.id !== args[0]);
+            }
+            continue;
+          }
           if (table !== 'Participations') throw new Error(`Table inconnue : ${table}`);
-          if ((type === 'AddColumn' || type === 'RemoveColumn') && params.has('sans-droits')) throw new Error('Blocked by table structure access rules');
+          if ((type === 'AddColumn' || type === 'RemoveColumn') && (params.has('sans-droits') || fermeAuxInconnus())) throw new Error('Blocked by table structure access rules');
           if (type === 'AddColumn') {
             colonnesParticipations.push(args[0]);
             infosColonnes[args[0]] = args[1];
@@ -165,6 +200,7 @@
             participations.forEach((l) => delete l[args[0]]);
           } else if (type === 'AddRecord') {
             const valeurs = args[1] || {};
+            if (fermeAuxInconnus()) throw new Error('Blocked by table create access rules');
             if (params.has('sans-ajout') || (params.has('ecriture-refusee') && 'Evenement' in valeurs)) throw new Error('Blocked by table create access rules');
             for (const col of Object.keys(valeurs)) if (!colonnesParticipations.includes(col)) throw new Error(`Colonne inconnue : ${col}`);
             // comme Grist : une colonne « recalcWhen 1 » n'est pas calculée à la création de la ligne

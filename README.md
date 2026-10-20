@@ -82,15 +82,24 @@ Le reste (journaux de synchronisation, structure du document, masquer les e-mail
 
 Pour que n’importe qui puisse ouvrir le planning sans qu’on l’ajoute au document, mais que seules les personnes **connectées à Grist et présentes dans l’`Annuaire`** puissent cocher :
 
-1. Fenêtre **Partager** : accès public (« toute personne disposant du lien ») en **éditeur**. Il faut l’éditeur, pas le lecteur : un lecteur ne peut rien écrire, quelles que soient les règles. Les personnes déjà ajoutées une à une n’ont plus besoin de l’être.
+1. **Ouvrir le widget une fois avec le compte propriétaire** : il crée la table `Demandes_Annuaire` (voir plus bas).
 2. **Règles d’accès**, à ajouter aux règles ci-dessus (un éditeur qui n’est pas ajouté nommément est un éditeur comme les autres) :
    - **Attribut utilisateur** `acl` : à conserver (nom `acl`, attribut `Email`, table `Annuaire`, colonne `email`) ; c’est lui qui dit si l’adresse de la personne est dans l’`Annuaire`. La règle qui la teste est `not user.acl.id` (pas `user.acl.id == 0` : l’identifiant vaut `None`, pas 0).
    - **`Annuaire`**, une règle en deuxième position, après celle des propriétaires : `user.Access not in [OWNER] and not user.acl.id` → R, U, C, D tous refusés.
    - **`Participations`**, une règle en deuxième position, après celle des propriétaires : `user.Access not in [OWNER] and not user.acl.id` → U, C, D refusés.
-   - **`Participations`, colonnes `Email` et `Utilisateur`** (« Ajouter des règles pour des colonnes ») : `user.Access not in [OWNER] and not user.acl.id` → R refusé. Les autres colonnes restent lisibles pour que la page du widget s’affiche.
+   - **`Participations`, colonnes `Email` et `Utilisateur`** (« Ajouter des règles pour des colonnes », avant les règles de la table) : `user.Access not in [OWNER] and not user.acl.id` → R refusé. Les autres colonnes restent lisibles pour que la page du widget s’affiche.
+   - **`Demandes_Annuaire`**, quatre lignes dans cet ordre : `user.Access in [OWNER]` → R U C D autorisés ; `user.IsLoggedIn and newRec.Email == user.Email` → C autorisé ; `user.IsLoggedIn and rec.Email == user.Email` → R et D autorisés ; tous les autres → tout refusé.
+   - **Toutes les autres tables** (« Ajouter des règles pour les autres tables », en bas) : `user.Access not in [OWNER] and not user.acl.id` → R, U, C, D refusés, puis la règle de structure ci-dessous. Une table ajoutée plus tard est ainsi fermée d’office.
    - **Structure** : case « Autoriser les éditeurs à modifier la structure » décochée, et « Autoriser tout le monde à copier le document » décochée.
+3. **Partager** : accès public (« toute personne disposant du lien ») en **éditeur**. Il faut l’éditeur, pas le lecteur : un lecteur ne peut rien écrire, quelles que soient les règles.
 
-Résultat (`grist-reel.test.js`, « document ouvert à tout le monde ») : une personne anonyme ou connectée mais absente de l’`Annuaire` voit le planning, avec un message qui l’invite à se connecter avec son adresse professionnelle ; elle ne voit ni les noms, ni les e-mails, ni qui participe, et ne peut rien écrire. Une personne de l’`Annuaire` coche comme avant. L’adresse de l’`Annuaire` doit être celle de la connexion à Grist (la casse est indifférente, pas les espaces autour).
+Ce que voient les gens (`grist-reel.test.js`, « document ouvert à tout le monde » ; `faux-grist.test.js`, « accès ») :
+
+- **Personne non connectée** : le planning, sans les noms, les e-mails ni qui participe, et une fenêtre « Connectez-vous pour participer » en trois étapes illustrées (cliquer sur « Se connecter », choisir ProConnect « comme pour Resana », revenir cocher). Elle s’ouvre d’office une fois, puis par le bouton « Se connecter pour participer » de l’en-tête. Rien ne peut être écrit.
+- **Connectée mais absente de l’`Annuaire`** : la même vue, et une fenêtre avec un formulaire (prénom, nom, e-mail, établissement). La demande est enregistrée dans `Demandes_Annuaire` avec l’e-mail de connexion et la date, ajoutés par Grist (impossibles à falsifier). Si la personne revient, elle retrouve sa demande. L’organisateur lit la table, vérifie et ajoute la personne à l’`Annuaire` à la main. Les noms de la fenêtre (ProConnect, Resana) sont dans `CONFIG.connexion`.
+- **Personne de l’`Annuaire`** : comme avant, même sans être ajoutée nommément au document.
+
+La table `Demandes_Annuaire` (colonnes `Nom`, `Prenom`, `Email_saisi`, `Etablissement`, `Email` et `Date`, ces deux dernières calculées par Grist à la création) est créée par le widget quand le compte qui l’ouvre peut modifier la structure ; sans elle, les personnes hors `Annuaire` voient seulement un message qui leur dit de demander à y être ajoutées. L’adresse de l’`Annuaire` doit être celle de la connexion à Grist (la casse est indifférente, pas les espaces autour).
 
 ## Publics visés (filtre « Pour qui ? »)
 
