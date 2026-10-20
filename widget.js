@@ -65,7 +65,7 @@ const LIBELLES = {
 };
 
 /* Publics visés : les quatre publics des plannings imprimés, saisis dans la colonne « Cibles » de Evenements (liste de choix).
-   La rangée de bulles « Pour qui ? » n’apparaît que si cette colonne existe et contient au moins une valeur. Couleurs : style.css (.cible--code). */
+   La rangée de bulles « Pour qui ? » n’apparaît que si cette colonne existe et contient au moins une valeur. */
 const CIBLES = [
   { code: 'pedagogie',   libelle: 'Pédagogie',   qui: 'enseignants-chercheurs et professionnels de la formation et de la transformation pédagogique' },
   { code: 'recherche',   libelle: 'Recherche',   qui: 'enseignants-chercheurs, chercheurs, doctorants' },
@@ -74,7 +74,7 @@ const CIBLES = [
 ];
 
 /* Numéro de version, affiché en bas de page : il permet de vérifier quelle version Grist a chargée (cache du navigateur). */
-const VERSION = '2026-10-20 · i';
+const VERSION = '2026-10-20 · j';
 
 const JOURS_SEMAINE = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
 const MOIS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
@@ -658,8 +658,7 @@ function rendreCibles(utilisees) {
   zone.hidden = !utilisees.length;
   if (zone.hidden) return;
   el('cibles-bulles').innerHTML = utilisees.map((c) => `
-    <button class="bulle cible--${c.code}" type="button" data-cible="${c.code}" data-focus="cible-${c.code}" aria-pressed="${choisis.has(c.code)}" title="${echapper(`${c.libelle} : ${c.qui}`)}">
-      <span class="bulle__point" aria-hidden="true"></span>${c.libelle}</button>`).join('');
+    <button class="bulle" type="button" data-cible="${c.code}" data-focus="cible-${c.code}" aria-pressed="${choisis.has(c.code)}" title="${echapper(`${c.libelle} : ${c.qui}`)}">${c.libelle}</button>`).join('');
   const n = etat.evenements.filter(concerne).length;
   el('cibles-nb').textContent = choisis.size ? `${nombre(n, ['événement', 'événements'])} sur ${etat.evenements.length}` : '';
 }

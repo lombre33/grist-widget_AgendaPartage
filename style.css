@@ -88,20 +88,14 @@ a { color: var(--magenta); -webkit-tap-highlight-color: transparent; }
 .filtre { min-height: 44px; padding: 6px 16px; border: 1px solid var(--magenta); border-radius: 999px; background: #fff; color: var(--magenta); font-weight: 700; }
 .filtre[aria-pressed="true"] { background: var(--magenta); color: #fff; }
 
-/* ---------- « Pour qui ? » : une rangée de bulles au-dessus des jours (comme des boutons radio, plusieurs possibles) ----------
-   Couleurs des quatre publics reprises des plannings imprimés ; elles ne servent qu’au point, le nom est toujours écrit. */
-.cible--pedagogie   { --cible: #ffcc00; }
-.cible--recherche   { --cible: #3f88c5; }
-.cible--etudiants   { --cible: #e0661a; }
-.cible--entreprises { --cible: #b9348b; }
-
-.cibles { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-bottom: 12px; }
+/* ---------- « Pour qui ? » : une rangée de bulles discrète au-dessus des jours (un ou plusieurs publics) ---------- */
+.cibles { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
 .cibles__bulles { display: contents; }
 .cibles__titre { margin-right: 2px; font-size: 0.85rem; color: var(--gris); }
-.bulle { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 4px 14px 4px 12px; border: 1px solid var(--filet); border-radius: 999px; background: #fff; font-size: 0.9rem; }
-.bulle__point { flex: none; width: 14px; height: 14px; border: 2px solid var(--cible); border-radius: 50%; background: #fff; box-shadow: 0 0 0 1px rgba(59, 28, 19, .25); }   /* bouton radio vide, cerclé de brun pour que le jaune se voie */
+/* 32 px de haut à l’œil, 44 px au doigt : la zone tactile déborde de la bulle (comme le lien du lieu) */
+.bulle { position: relative; min-height: 32px; padding: 2px 12px; border: 1px solid var(--filet); border-radius: 999px; background: #fff; font-size: 0.85rem; line-height: 1.2; }
+.bulle::after { content: ""; position: absolute; inset: -6px -2px; }
 .bulle[aria-pressed="true"] { border-color: var(--magenta); background: var(--magenta-clair); color: var(--magenta-fonce); font-weight: 700; }
-.bulle[aria-pressed="true"] .bulle__point { background: var(--cible); }   /* bouton radio plein */
 
 /* Légende des compteurs, quand les colonnes sont trop étroites pour écrire « présents » (grand écran) */
 .legende { display: none; }

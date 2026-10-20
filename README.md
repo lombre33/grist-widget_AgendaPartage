@@ -84,7 +84,7 @@ La colonne facultative `Cibles` de `Evenements` (type **Liste de choix**, choix 
 - Une rangée de bulles « Pour qui ? » au-dessus des jours, rien sur les fiches. On coche un ou plusieurs publics : un événement reste affiché s’il concerne l’un d’eux ; aucune bulle cochée, tout le planning. Un jour sans événement pour ce public affiche « Aucun événement pour ce public ce jour-là ».
 - Sans colonne `Cibles` (ou si elle est vide), la rangée n’apparaît pas : le widget reste comme avant. Un événement sans aucun public n’apparaît que quand aucune bulle n’est cochée.
 - Le choix est gardé sur l’appareil (`localStorage`, clé `semaine-innovation-2026:cibles`).
-- Noms et légendes : `CIBLES` dans `widget.js` ; couleurs des points : `.cible--code` dans `style.css`.
+- Noms des bulles et infobulle (qui est concerné) : `CIBLES` dans `widget.js` ; style : `.bulle` dans `style.css`.
 
 ## Affichage
 
