@@ -493,8 +493,9 @@ describe('vrai Grist', { skip: disponible ? false : `Grist ne répond pas sur ${
       assert.equal((await lignes(PROPRIO, doc.doc, 'Demandes_Annuaire')).length, 0, 'le widget n\'écrit rien dans les demandes pour une personne reconnue');
     });
 
-    test('une personne connectée mais absente de l\'Annuaire remplit le formulaire : sa demande est journalisée avec son e-mail de connexion', async () => {
+    test('une personne connectée mais absente de l\'Annuaire s\'inscrit par le formulaire, est reconnue aussitôt et coche', async () => {
       const doc = await nouveau({ publique: true });
+      const avant = await lignes(PROPRIO, doc.doc, 'Annuaire');
       const { widget, page } = await ouvrir(INCONNU, doc);
       assert.equal(await widget.locator(SEL.evenement).count(), 30);
       assert.equal(await widget.locator('button[data-action="choisir"]').count(), 0);
@@ -507,29 +508,49 @@ describe('vrai Grist', { skip: disponible ? false : `Grist ne répond pas sur ${
       await widget.locator('#acces input[name="nom"]').fill('Roux');
       await widget.locator('#acces input[name="emailSaisi"]').fill('sam.roux@association.example');
       await widget.locator('#acces input[name="etablissement"]').fill('Association locale');
-      await widget.locator('#acces').getByRole('button', { name: 'Envoyer ma demande' }).click();
-      await attendre(async () => /votre demande est enregistrée/.test(await widget.locator('#acces h2').innerText()), { message: 'pas de confirmation' });
+      await widget.locator('#acces').getByRole('button', { name: 'M’inscrire' }).click();
+      // Grist recharge la page de la personne (son attribut « acl » a changé) : le widget la reconnaît
+      const apres = await attendre(() => {
+        const f = page.frames().find((x) => x.url().startsWith(srv.url));
+        return f && f.locator(SEL.nom).innerText({ timeout: 500 }).then((t) => t === 'Sam Roux' && f, () => false);
+      }, { delai: 30000, message: 'la personne n\'est pas reconnue après son inscription' });
+      assert.equal(await apres.locator('#acces[open]').count(), 0, 'plus de fenêtre');
+      const annuaire = await lignes(PROPRIO, doc.doc, 'Annuaire');
+      assert.equal(annuaire.length, avant.length + 1, 'une seule ligne ajoutée');
+      assert.deepEqual(annuaire.slice(0, avant.length), avant, 'les lignes existantes n\'ont pas bougé');
+      const nouvelle = annuaire[annuaire.length - 1];
+      assert.deepEqual([nouvelle.nom, nouvelle.prenom, nouvelle.email, nouvelle.nom_de_domaine, nouvelle.Etablissement], ['Roux', 'Sam', INCONNU, 'exemple.org', 'Association locale']);
       const [demande] = await lignes(PROPRIO, doc.doc, 'Demandes_Annuaire');
-      assert.equal(demande.Nom, 'Roux');
-      assert.equal(demande.Prenom, 'Sam');
-      assert.equal(demande.Email_saisi, 'sam.roux@association.example');
-      assert.equal(demande.Etablissement, 'Association locale');
-      assert.equal(demande.Email, INCONNU, 'e-mail de connexion ajouté par Grist');
+      assert.deepEqual([demande.Nom, demande.Prenom, demande.Email_saisi, demande.Etablissement, demande.Email], ['Roux', 'Sam', 'sam.roux@association.example', 'Association locale', INCONNU], 'journal de la demande');
       assert.ok(Math.abs(demande.Date - Date.now() / 1000) < 600, 'date ajoutée par Grist');
-      assert.equal((await participations(PROPRIO, doc)).length, 0, 'rien dans Participations');
-      // en revenant, elle retrouve sa demande au lieu du formulaire ; les autres ne la lisent pas ; l'Annuaire n'a pas bougé
-      await page.context().close();
-      const encore = await ouvrir(INCONNU, doc);
-      await fenetreAcces(encore.widget);
-      assert.match(await encore.widget.locator('#acces h2').innerText(), /votre demande est enregistrée/);
-      assert.equal(await encore.widget.locator('#acces form').count(), 0);
-      assert.equal((await lignes(JEANNE, doc.doc, 'Demandes_Annuaire').catch(() => [])).length, 0, 'une autre personne ne lit pas les demandes');
-      assert.equal((await lignes(PROPRIO, doc.doc, 'Annuaire')).length, 7, 'l\'Annuaire n\'a pas bougé');
-      // elle ne peut pas se faire passer pour une autre en écrivant l'e-mail de connexion, ni modifier sa demande
-      await assert.rejects(appliquer(INCONNU, doc.doc, [['AddRecord', 'Demandes_Annuaire', null, { Nom: 'x', Email: JEANNE }]]), /403/);
-      await assert.rejects(appliquer(INCONNU, doc.doc, [['UpdateRecord', 'Demandes_Annuaire', demande.id, { Nom: 'y' }]]), /403/);
-      await assert.rejects(appliquer(INCONNU, doc.doc, [['AddRecord', 'Participations', null, { Statut: 'sur' }]]), /403/);
-      await assert.rejects(lignes(INCONNU, doc.doc, 'Annuaire'), /403/);
+      // elle coche comme tout le monde
+      await carte(apres, 'Atelier Durable').locator(SEL.present).click();
+      await attendre(async () => (await miennes(PROPRIO, doc, INCONNU)).length === 1);
+      const [presence] = await miennes(PROPRIO, doc, INCONNU);
+      assert.equal(presence.Statut, 'présent');
+      assert.ok(presence.Utilisateur, 'liée à sa ligne de l\'Annuaire');
+      // ... et c'est tout : une seule inscription, pas de ligne au nom d'un autre, aucune modification de l'Annuaire
+      await assert.rejects(appliquer(INCONNU, doc.doc, [['AddRecord', 'Annuaire', null, { nom: 'bis', email: INCONNU }]]), /403/);
+      await assert.rejects(appliquer(INCONNU, doc.doc, [['UpdateRecord', 'Annuaire', nouvelle.id, { email: JEANNE }]]), /403/);
+      await assert.rejects(appliquer(INCONNU, doc.doc, [['UpdateRecord', 'Annuaire', 1, { Fonction: 'x' }]]), /403/);
+      await assert.rejects(appliquer(INCONNU, doc.doc, [['RemoveRecord', 'Annuaire', 1]]), /403/);
+    });
+
+    test('inscription refusée par les règles : la demande reste enregistrée, la personne est prévenue', async () => {
+      const doc = await nouveau({ publique: true });
+      // une règle de plus (déjà en place chez Antoine aujourd'hui) : personne ne crée sa ligne dans l'Annuaire
+      const regles = (await api(PROPRIO, 'GET', `/docs/${doc.doc}/tables/_grist_ACLRules/records`)).records;
+      const creation = regles.find((r) => r.fields.aclFormula.startsWith('user.IsLoggedIn and not user.acl.id'));
+      await appliquer(PROPRIO, doc.doc, [['UpdateRecord', '_grist_ACLRules', creation.id, { permissionsText: '-C' }]]);
+      const { widget } = await ouvrir(INCONNU, doc);
+      await fenetreAcces(widget);
+      await widget.locator('#acces input[name="prenom"]').fill('Sam');
+      await widget.locator('#acces input[name="nom"]').fill('Roux');
+      await widget.locator('#acces input[name="etablissement"]').fill('Association locale');
+      await widget.locator('#acces').getByRole('button', { name: 'M’inscrire' }).click();
+      await attendre(async () => /votre demande est enregistrée/.test(await widget.locator('#acces h2').innerText()), { message: 'pas de confirmation de la demande' });
+      assert.equal((await lignes(PROPRIO, doc.doc, 'Demandes_Annuaire')).length, 1);
+      assert.equal((await lignes(PROPRIO, doc.doc, 'Annuaire')).length, 5 + 2, 'l\'Annuaire n\'a pas bougé');
     });
 
     test('une table ajoutée plus tard est fermée aux personnes hors Annuaire d\'office', async () => {

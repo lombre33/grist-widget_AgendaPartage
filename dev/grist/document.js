@@ -151,7 +151,11 @@ async function installerReglesPartagePublic(doc) {
   const rules = [
     { resource: defaut, userAttributes: JSON.stringify({ name: 'acl', tableId: 'Annuaire', lookupColId: 'email', charId: 'Email' }), aclFormula: '', permissionsText: '', memo: '' },
     regle(colonnes, horsAnnuaire, '-R'),
-    regle(annuaire, 'user.Access in [OWNER]', '+R+U+C+D'), regle(annuaire, horsAnnuaire, '-R-U-C-D'), regle(annuaire, '', '+R-U-C-D'),
+    // Annuaire : une personne connectée, pas encore dans l'Annuaire, peut y créer sa propre ligne (une seule : ensuite elle y est) ; rien d'autre
+    regle(annuaire, 'user.Access in [OWNER]', '+R+U+C+D'),
+    regle(annuaire, 'user.IsLoggedIn and not user.acl.id and newRec.email == user.Email', '+C'),
+    regle(annuaire, horsAnnuaire, '-R-U-C-D'),
+    regle(annuaire, '', '+R-U-C-D'),
     regle(etablissement, 'user.Access in [OWNER]', '+R+U+C+D'), regle(etablissement, '', '+R-U-C-D'),
     regle(evenements, 'user.Access in [OWNER]', '+R+U+C+D'), regle(evenements, '', '+R-U-C-D'),
     regle(participations, 'user.Access in [OWNER]', '+R+U+C+D'),

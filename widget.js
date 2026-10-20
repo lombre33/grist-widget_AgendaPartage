@@ -60,6 +60,9 @@ const CONFIG = {
     nom: 'Nom', prenom: 'Prenom', emailSaisi: 'Email_saisi', etablissement: 'Etablissement',
     email: 'Email',                      // formule « à la création » : user.Email, l’e-mail de connexion
     date: 'Date',                        // formule « à la création » : NOW()
+    // Vrai : le formulaire ajoute aussi la personne à l’Annuaire (avec son e-mail de connexion), sans validation : elle peut cocher aussitôt.
+    // La demande reste dans la table ci-dessus, comme journal. Si les règles d’accès ne laissent pas la personne créer sa ligne, seule la demande est enregistrée.
+    inscriptionAuto: true,
   },
   // Fenêtre « Connectez-vous pour participer » : le service de connexion et le service que les gens connaissent déjà.
   connexion: { service: 'ProConnect', reference: 'Resana' },
@@ -125,6 +128,7 @@ const etat = {
   emailConnexion: '',          // son e-mail de connexion, quand on le connaît
   demandesDisponibles: false,  // la table des demandes d’ajout existe et cette personne peut y écrire
   demande: null,               // sa demande déjà enregistrée : { nom, prenom, emailSaisi, etablissement, date }
+  inscrit: false,              // la personne vient d’être ajoutée à l’Annuaire par le formulaire
   demandeEnCours: false,       // envoi de la demande en cours
   erreurDemande: '',
   brouillon: null,             // ce qu’elle a saisi (pour ne pas le perdre si l’envoi échoue)
@@ -926,7 +930,7 @@ function rendreEntete() {
   } else {
     zone.className = 'entete__moi moi moi--lecture';
     if (etat.acces) {   // la fenêtre d’explication peut être rouverte
-      zone.innerHTML = `<button type="button" class="moi__bouton" data-action="acces" data-focus="acces">${etat.acces === 'anonyme' ? 'Se connecter pour participer' : etat.demande ? 'Demande envoyée' : 'Demander mon ajout'}</button>`;
+      zone.innerHTML = `<button type="button" class="moi__bouton" data-action="acces" data-focus="acces">${etat.acces === 'anonyme' ? 'Se connecter pour participer' : etat.inscrit ? 'Inscription enregistrée' : etat.demande ? 'Demande envoyée' : CONFIG.demandes.inscriptionAuto ? 'M’inscrire à l’annuaire' : 'Demander mon ajout'}</button>`;
     } else zone.textContent = 'Lecture seule';
   }
   const nb = etat.evenements.filter((e) => monStatut(e.id)).length;
@@ -971,7 +975,7 @@ function rendrePlanning(jours) {
 
 function rendre() {
   if (!etat.pret) return;   // le premier affichage attend la fin du premier chargement
-  const technique = etat.erreurColonnes || etat.erreur || (!etat.moi && etat.messageMoi) || '';
+  const technique = etat.erreurColonnes || etat.erreur || (!etat.moi && !etat.inscrit && etat.messageMoi) || '';
   if (technique) {
     const { texte: simple, detail } = messageSimple(technique);
     afficherMessage(simple, Boolean(etat.erreurColonnes || etat.erreur), detail);
@@ -1003,7 +1007,7 @@ function rendre() {
    à qui n’y figure pas. Le widget distingue alors deux cas et l’explique dans une fenêtre :
    - la personne n’est pas connectée à Grist : comment se connecter ;
    - elle est connectée mais absente de l’Annuaire : un formulaire (nom, prénom, e-mail, établissement) qui l’inscrit
-     dans la table des demandes, pour que l’organisateur l’ajoute.
+     dans l’Annuaire (et dans la table des demandes, qui sert de journal).
    ---------------------------------------------------------------------------- */
 // Les messages d’erreur de Grist quand une règle d’accès refuse une lecture ou une écriture.
 const MOTIF_REFUS = /blocked by|access rules|denied|forbidden|permission|\b403\b/i;
@@ -1148,6 +1152,12 @@ function contenuConnexion() {
 function contenuDemande() {
   const connecte = etat.emailConnexion ? `<p class="acces__sur">Connecté(e) avec <span class="acces__mail">${echapper(etat.emailConnexion)}</span></p>` : '';
   const fermer = '<div class="acces__actions"><button type="button" class="acces__bouton" data-action="fermer-acces">Fermer</button></div>';
+  if (etat.inscrit) {
+    return `${connecte}
+      <h2 id="acces-titre">Bienvenue, vous êtes dans l’annuaire</h2>
+      <p class="acces__intro">Le planning se recharge : vous pourrez ensuite indiquer vos présences.</p>
+      <dl class="acces__recap"><dt>Nom</dt><dd>${echapper(`${etat.demande.prenom} ${etat.demande.nom}`)}</dd><dt>Établissement</dt><dd>${echapper(etat.demande.etablissement)}</dd></dl>`;
+  }
   if (etat.demande) {
     const quand = dateLongue(etat.demande.date);
     return `${connecte}
@@ -1166,7 +1176,7 @@ function contenuDemande() {
   const champ = (nom, libelle, valeur, extra = '') => `<label class="acces__champ"><span>${libelle}</span><input name="${nom}" value="${echapper(valeur)}" required maxlength="200" ${extra}></label>`;
   return `${connecte}
     <h2 id="acces-titre">Vous n’êtes pas encore dans l’annuaire</h2>
-    <p class="acces__intro">Dites-nous qui vous êtes : nous vous ajoutons rapidement et vous pourrez alors indiquer vos présences.</p>
+    <p class="acces__intro">${CONFIG.demandes.inscriptionAuto ? 'Dites-nous qui vous êtes : vous êtes ajouté(e) tout de suite et pouvez alors indiquer vos présences.' : 'Dites-nous qui vous êtes : nous vous ajoutons rapidement et vous pourrez alors indiquer vos présences.'}</p>
     <form id="acces-form" class="acces__form">
       <div class="acces__duo">${champ('prenom', 'Prénom', b.prenom || '', 'autocomplete="given-name"')}${champ('nom', 'Nom', b.nom || '', 'autocomplete="family-name"')}</div>
       ${champ('emailSaisi', 'E-mail', b.emailSaisi || etat.emailConnexion, 'type="email" autocomplete="email"')}
@@ -1175,29 +1185,54 @@ function contenuDemande() {
       ${etat.erreurDemande ? `<p class="acces__erreur" role="alert">${echapper(etat.erreurDemande)}</p>` : ''}
       <div class="acces__actions">
         <button type="button" class="acces__lien" data-action="fermer-acces">Plus tard</button>
-        <button type="submit" class="acces__bouton"${etat.demandeEnCours ? ' disabled' : ''}>${etat.demandeEnCours ? 'Envoi…' : 'Envoyer ma demande'}</button>
+        <button type="submit" class="acces__bouton"${etat.demandeEnCours ? ' disabled' : ''}>${etat.demandeEnCours ? 'Envoi…' : CONFIG.demandes.inscriptionAuto ? 'M’inscrire' : 'Envoyer ma demande'}</button>
       </div>
     </form>`;
 }
 
-/** Enregistre la demande d’ajout dans la table des demandes (l’e-mail de connexion et la date sont ajoutés par Grist). */
+const domaineDe = (email) => texte(email).split('@').slice(1).join('@').toLowerCase();
+
+/**
+ * Enregistre la demande dans la table des demandes (l’e-mail de connexion et la date sont ajoutés par Grist) et, si `inscriptionAuto`,
+ * ajoute la personne à l’Annuaire dans la même opération : le lien avec son établissement se fait par le domaine de son e-mail.
+ * Le widget se recharge ensuite et la personne est reconnue (son attribut `acl` suit tout de suite). Si les règles lui refusent
+ * de créer sa ligne dans l’Annuaire, la demande seule est enregistrée.
+ */
 async function envoyerDemande(valeurs) {
   const d = CONFIG.demandes;
+  const a = CONFIG.annuaire;
   etat.brouillon = valeurs;
   etat.demandeEnCours = true;
   etat.erreurDemande = '';
   rendre();
+  const demande = ['AddRecord', d.table, null, {
+    [d.nom]: valeurs.nom, [d.prenom]: valeurs.prenom, [d.emailSaisi]: valeurs.emailSaisi, [d.etablissement]: valeurs.etablissement,
+  }];
+  const inscription = ['AddRecord', CONFIG.tables.annuaire, null, {
+    [a.nom]: valeurs.nom, [a.prenom]: valeurs.prenom, [a.email]: etat.emailConnexion, [a.domaine]: domaineDe(etat.emailConnexion), [a.etablissement]: valeurs.etablissement,
+  }];
   try {
-    await grist.docApi.applyUserActions([['AddRecord', d.table, null, {
-      [d.nom]: valeurs.nom, [d.prenom]: valeurs.prenom, [d.emailSaisi]: valeurs.emailSaisi, [d.etablissement]: valeurs.etablissement,
-    }]]);
+    if (d.inscriptionAuto && etat.emailConnexion) {
+      try {
+        await grist.docApi.applyUserActions([demande, inscription]);
+        etat.inscrit = true;
+      } catch (err) {
+        if (!MOTIF_REFUS.test(texte(err && err.message))) throw err;
+        console.warn('Ajout à l’Annuaire refusé par les règles d’accès : demande seule', err);
+        await grist.docApi.applyUserActions([demande]);
+      }
+    } else {
+      await grist.docApi.applyUserActions([demande]);
+    }
     etat.demande = { ...valeurs, date: Math.floor(Date.now() / 1000) };
   } catch (err) {
     console.error('Demande d’ajout non enregistrée', err);
-    etat.erreurDemande = 'Votre demande n’a pas pu être enregistrée. Réessayez dans un instant ou prévenez l’organisateur.';
+    etat.erreurDemande = 'Votre inscription n’a pas pu être enregistrée. Réessayez dans un instant ou prévenez l’organisateur.';
   }
   etat.demandeEnCours = false;
   rendre();
+  // Grist ne recharge pas le widget : on le recharge ici, juste après avoir montré la confirmation, pour que la personne soit reconnue.
+  if (etat.inscrit) setTimeout(() => location.reload(), 1500);
 }
 
 /** La fenêtre : montrée d’office une fois, puis à la demande (bouton de l’en-tête). Son contenu n’est refait que si l’état change (la saisie est préservée). */
@@ -1209,7 +1244,7 @@ function rendreAcces() {
     return;
   }
   if (!etat.accesPropose) { etat.accesPropose = true; etat.accesOuvert = true; }
-  const cle = [etat.acces, Boolean(etat.demande), etat.demandesDisponibles, etat.demandeEnCours, etat.erreurDemande, etat.etablissements.length].join('|');
+  const cle = [etat.acces, Boolean(etat.demande), etat.inscrit, etat.demandesDisponibles, etat.demandeEnCours, etat.erreurDemande, etat.etablissements.length].join('|');
   if (fenetre.dataset.cle !== cle) {
     fenetre.dataset.cle = cle;
     fenetre.innerHTML = `<div class="acces__corps" tabindex="-1" autofocus>${etat.acces === 'anonyme' ? contenuConnexion() : contenuDemande()}</div>`;

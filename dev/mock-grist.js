@@ -13,6 +13,7 @@
                     ?public         document ouvert à tout le monde : l'Annuaire et l'écriture dans Participations sont fermés à qui n'y figure pas
                                     (à combiner avec ?anonyme ou ?inconnu) ; il reste la table des demandes d'ajout
                     ?sans-demandes  la table Demandes_Annuaire n'existe pas encore (le widget la crée) ; avec ?sans-droits il n'y arrive pas
+                    ?sans-inscription  les règles d'accès refusent à une personne de créer sa ligne dans l'Annuaire (la demande seule est enregistrée)
                     ?demande-refusee  l'enregistrement d'une demande d'ajout échoue
                     ?demande-faite  la personne a déjà fait sa demande d'ajout
                     ?sans-declencheur  la formule « à la création » (user.Email) ne donne rien : le widget se rabat sur l'e-mail lisible
@@ -61,6 +62,8 @@
     personne(7, 'Sophie', 'Roux', 'exemple.org', 'Association locale'),   // aucun logo : initiales
     personne(8, 'Yanis', 'Fabre', 'bordeaux-inp.fr', 'Bordeaux INP'),
   ];
+  // Une personne qui vient de s'inscrire par le formulaire : Grist a rechargé la page, elle est maintenant dans l'Annuaire
+  if (params.has('inscrit')) ANNUAIRE.push({ id: 99, ...JSON.parse(params.get('inscrit')) });
   const moiId = Number(params.get('moi')) || 1;
   const parId = (id) => ANNUAIRE.find((p) => p.id === id);
   if (params.has('foule')) {   // 60 personnes de plus, toutes inscrites à l'événement 3 : pour voir la liste groupée par établissement
@@ -168,10 +171,23 @@
       async applyUserActions(actions) {
         await attendre();
         window.MOCK_ACTIONS.push(JSON.parse(JSON.stringify(actions)));
+        // Une opération est refusée en bloc : la demande n'est pas enregistrée si la création dans l'Annuaire est refusée
+        if (params.has('sans-inscription') && actions.some((a) => a[1] === 'Annuaire')) throw new Error('Blocked by table create access rules');
         const retValues = [];
         for (const [type, table, ...args] of actions) {
           retValues.push(null);
-          if (table === 'Annuaire') throw new Error('Le widget ne doit pas écrire dans l’Annuaire (attribut utilisateur : rechargement du document)');
+          if (table === 'Annuaire') {
+            // Seule exception : une personne connectée qui n'y est pas encore crée sa propre ligne (formulaire d'inscription)
+            if (type !== 'AddRecord' || !emailConnecte || personneDe(emailConnecte)) throw new Error('Le widget ne doit pas écrire dans l’Annuaire (attribut utilisateur : rechargement du document)');
+            const v = args[1] || {};
+            if (v.email !== emailConnecte) throw new Error('Blocked by table create access rules');
+            retValues[retValues.length - 1] = 99;
+            // La ligne est dans l'Annuaire : au prochain chargement (le widget se recharge de lui-même), la personne y est reconnue
+            const u = new URL(location.href);
+            u.searchParams.set('inscrit', JSON.stringify({ prenom: v.prenom, nom: v.nom, email: v.email, Etablissement: v.Etablissement, nom_de_domaine: v.nom_de_domaine }));
+            history.replaceState(null, '', u.href);
+            continue;
+          }
           if (table === 'Demandes_Annuaire') {
             if (type === 'AddTable') {
               if (params.has('sans-droits')) throw new Error('Blocked by table structure access rules');

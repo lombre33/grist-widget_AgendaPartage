@@ -561,28 +561,48 @@ describe('accès : connexion (personne anonyme) et demande d\'ajout à l\'Annuai
     assert.equal(await page.locator('#acces[open]').count(), 0);
   });
 
-  test('connectée mais absente de l\'Annuaire (document ouvert à tous) : le formulaire inscrit la demande avec son e-mail de connexion', async () => {
+  test('connectée mais absente de l\'Annuaire (document ouvert à tous) : le formulaire l\'inscrit, elle est reconnue et peut cocher', async () => {
     const page = await ouvrir({ requete: '?public&inconnu' });
     await fenetre(page).waitFor();
     assert.match(await fenetre(page).innerText(), /avec quelquun@exemple\.org/i);
     assert.match(await fenetre(page).locator('h2').innerText(), /pas encore dans l’annuaire/);
+    assert.match(await fenetre(page).innerText(), /ajouté\(e\) tout de suite/);
     assert.equal(await fenetre(page).locator('input[name="emailSaisi"]').inputValue(), 'quelquun@exemple.org', 'l\'e-mail de connexion est proposé');
     assert.deepEqual(await fenetre(page).locator('datalist option').evaluateAll((os) => os.map((o) => o.value)).then((v) => v.slice(0, 2)), ['Université de Bordeaux', 'Bordeaux INP']);
     // champs obligatoires : rien n'est envoyé tant qu'ils ne sont pas remplis
-    await fenetre(page).getByRole('button', { name: 'Envoyer ma demande' }).click();
+    await fenetre(page).getByRole('button', { name: 'M’inscrire' }).click();
     assert.equal((await demandes(page)).filter((a) => a[3] && a[3].Nom).length, 0);
     await fenetre(page).locator('input[name="prenom"]').fill('Sam');
     await fenetre(page).locator('input[name="nom"]').fill('<img src=x onerror=alert(1)>');
     await fenetre(page).locator('input[name="etablissement"]').fill('Association  locale');
-    await fenetre(page).getByRole('button', { name: 'Envoyer ma demande' }).click();
-    await attendre(async () => /votre demande est enregistrée/.test(await fenetre(page).locator('h2').innerText()), { message: 'la confirmation n\'apparaît pas' });
-    const envoi = (await demandes(page)).find((a) => a[0] === 'AddRecord' && a[3] && a[3].Nom);
-    assert.deepEqual(envoi[3], { Nom: '<img src=x onerror=alert(1)>', Prenom: 'Sam', Email_saisi: 'quelquun@exemple.org', Etablissement: 'Association locale' });
+    await fenetre(page).getByRole('button', { name: 'M’inscrire' }).click();
+    await attendre(async () => /Bienvenue, vous êtes dans l’annuaire/.test(await fenetre(page).locator('h2').innerText()), { message: 'la confirmation n\'apparaît pas' });
+    // une seule opération : le journal de la demande et la ligne de l'Annuaire (e-mail de connexion, domaine, établissement)
+    const lot = (await actions(page)).find((l) => l.some((a) => a[1] === 'Annuaire'));
+    assert.deepEqual(lot, [
+      ['AddRecord', 'Demandes_Annuaire', null, { Nom: '<img src=x onerror=alert(1)>', Prenom: 'Sam', Email_saisi: 'quelquun@exemple.org', Etablissement: 'Association locale' }],
+      ['AddRecord', 'Annuaire', null, { nom: '<img src=x onerror=alert(1)>', prenom: 'Sam', email: 'quelquun@exemple.org', nom_de_domaine: 'exemple.org', Etablissement: 'Association locale' }],
+    ]);
     assert.equal(await fenetre(page).locator('img').count(), 0, 'rien n\'est interprété comme du HTML');
-    assert.match(await fenetre(page).locator('.acces__recap').innerText(), /Sam <img src=x onerror=alert\(1\)>/);
-    assert.equal(await page.locator('#moi button').innerText(), 'Demande envoyée');
-    assert.equal((await lignes(page)).length, (await lignes(page)).length);
-    aucuneErreur(page);
+    // Grist recharge la page : la personne est reconnue, plus de fenêtre, elle peut cocher
+    await attendre(async () => (await page.locator(SEL.nom).innerText().catch(() => '')) === 'Sam <img src=x onerror=alert(1)>', { delai: 15000, message: 'la personne n\'est pas reconnue après le rechargement' });
+    assert.equal(await page.locator('#acces[open]').count(), 0);
+    assert.ok(await page.locator('button[data-action="choisir"]').count() > 0, 'boutons de choix');
+    assert.equal(await page.locator('img[src="x"]').count(), 0);
+  });
+
+  test('si les règles refusent la création dans l\'Annuaire, la demande seule est enregistrée et on le dit', async () => {
+    const page = await ouvrir({ requete: '?public&inconnu&sans-inscription' });
+    await fenetre(page).waitFor();
+    await fenetre(page).locator('input[name="prenom"]').fill('Sam');
+    await fenetre(page).locator('input[name="nom"]').fill('Roux');
+    await fenetre(page).locator('input[name="etablissement"]').fill('Association locale');
+    await fenetre(page).getByRole('button', { name: 'M’inscrire' }).click();
+    await attendre(async () => /votre demande est enregistrée/.test(await fenetre(page).locator('h2').innerText()), { message: 'pas de confirmation de la demande' });
+    const lots = await actions(page);
+    assert.equal(lots.filter((l) => l.some((a) => a[1] === 'Annuaire')).length, 1, 'une tentative dans l\'Annuaire');
+    assert.deepEqual(lots[lots.length - 1].map((a) => a[1]), ['Demandes_Annuaire'], 'puis la demande seule');
+    assert.equal(await page.locator('button[data-action="choisir"]').count(), 0);
   });
 
   test('une demande déjà faite est rappelée, sans refaire le formulaire', async () => {
@@ -599,7 +619,7 @@ describe('accès : connexion (personne anonyme) et demande d\'ajout à l\'Annuai
     await fenetre(page).locator('input[name="prenom"]').fill('Sam');
     await fenetre(page).locator('input[name="nom"]').fill('Roux');
     await fenetre(page).locator('input[name="etablissement"]').fill('Association locale');
-    await fenetre(page).getByRole('button', { name: 'Envoyer ma demande' }).click();
+    await fenetre(page).getByRole('button', { name: 'M’inscrire' }).click();
     await attendre(async () => /n’a pas pu être enregistrée/.test(await fenetre(page).innerText()), { message: 'pas de message d\'erreur' });
     assert.equal(await fenetre(page).locator('input[name="nom"]').inputValue(), 'Roux');
     assert.equal(await fenetre(page).locator('input[name="etablissement"]').inputValue(), 'Association locale');
