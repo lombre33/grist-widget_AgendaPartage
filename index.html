@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="data:,">
+  <title>Planning – Semaine de l’innovation 2026</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="entete">
+    <img class="entete__logo" src="assets/logo-semaine-innovation.jpg"
+         alt="Semaine de l’innovation – Explorez, expérimentez, partagez – 23 - 27 novembre 2026">
+    <div class="entete__titre">
+      <h1>Le planning</h1>
+      <p class="entete__edition">3e édition</p>
+      <p class="entete__lieu">Sur les campus de la métropole bordelaise</p>
+    </div>
+    <div class="entete__actions">
+      <div class="entete__moi" id="moi"></div>
+      <button class="filtre" id="filtre" type="button" aria-pressed="false" data-focus="filtre"></button>
+    </div>
+  </header>
+
+  <div class="etat" id="etat" role="status" aria-live="polite"></div>
+
+  <nav class="onglets" id="onglets" aria-label="Jours de la semaine"></nav>
+
+  <main class="planning" id="planning"></main>
+
+  <footer class="pied">
+    <section class="pied__avant">
+      <h2>Avant votre venue</h2>
+      <p>Retrouvez les publics concernés, les informations pratiques et les dernières mises à jour sur les fiches en ligne.</p>
+      <a href="https://www.u-bordeaux.fr/evenements/semaine-de-linnovation-2026-3e-edition" target="_blank" rel="noopener">Consulter le programme <span aria-hidden="true">↗</span></a>
+    </section>
+    <p class="pied__mentions">
+      <strong>Pôle universitaire d’innovation Bordeaux</strong><br>
+      université de Bordeaux, cheffe de file<br>
+      Avec le soutien du pôle universitaire d’innovation Bordeaux, ce projet s’inscrit dans le Plan France 2030.
+    </p>
+  </footer>
+
+  <div class="toast" id="toast" role="alert" hidden></div>
+
+  <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+  <script src="widget.js"></script>
+</body>
+</html>
