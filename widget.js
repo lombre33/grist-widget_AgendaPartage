@@ -4,12 +4,13 @@
    Planning de la Semaine de l’innovation 2026 — widget personnalisé Grist
    Aucune dépendance autre que grist-plugin-api.js.
 
-   Trois tables Grist :
-   - Evenements   : import de l’Excel fourni (data/Evenements_Semaine_Innovation_2026.xlsx)
-   - Utilisateurs : la table ACL, une ligne par personne (nom, prénom, logo…)
-   - Presences    : une ligne par personne et par événement ; c’est la table à laquelle
-                    on lie le widget. Ses colonnes se choisissent dans le panneau
-                    de configuration du widget (voir COLONNES_PRESENCES).
+   Tables Grist utilisées :
+   - Evenements    : import de l’Excel fourni (data/Evenements_Semaine_Innovation_2026.xlsx)
+   - Annuaire      : une ligne par personne (nom, prénom, e-mail, établissement)
+   - Etablissement : le logo de chaque établissement
+   - Presences     : une ligne par personne et par événement ; c’est la table à laquelle
+                     on lie le widget. Ses colonnes se choisissent dans le panneau
+                     de configuration du widget (voir COLONNES_PRESENCES).
    ============================================================================ */
 
 /* ----------------------------------------------------------------------------
@@ -18,7 +19,8 @@
 const CONFIG = {
   tables: {
     evenements: 'Evenements',
-    utilisateurs: 'Utilisateurs',        // À CONFIRMER : nom de la table ACL
+    annuaire: 'Annuaire',
+    etablissements: 'Etablissement',
   },
   // Colonnes de la table Evenements : les en-têtes de l’Excel fourni, rien à changer.
   evenements: {
@@ -26,14 +28,23 @@ const CONFIG = {
     type: 'Type', tempsFort: 'Temps_fort', lieu: 'Lieu', ville: 'Ville',
     adresse: 'Adresse', public: 'Public', description: 'Description', lien: 'Lien',
   },
-  // Colonnes de la table ACL. À CONFIRMER : seuls ces trois noms sont à adapter.
-  utilisateurs: {
-    nom: 'Nom',
-    prenom: 'Prenom',
-    logo: 'Logo',                        // lien web (https://…) ou colonne Pièces jointes
+  // Colonnes de la table Annuaire.
+  annuaire: {
+    email: 'email',                      // sert à reconnaître la personne connectée (voir chargerMoi)
+    nom: 'nom',
+    prenom: 'prenom',
+    domaine: 'nom_de_domaine',           // lien avec l’établissement (en priorité)
+    etablissement: 'Etablissement',      // texte : lien avec l’établissement, si le domaine ne suffit pas
   },
-  // Valeurs écrites dans la colonne « Statut » de la table Presences.
-  statuts: { sur: 'sûr', probable: 'probable' },
+  // Colonnes de la table Etablissement.
+  etablissements: {
+    nom: 'Nom_complet',
+    domaine: 'nom_de_domaine',
+    logo: 'Logo',                        // colonne Pièces jointes, ou lien web (https://…)
+  },
+  // Valeurs écrites dans la colonne « Statut » de la table Presences
+  // (les anciennes valeurs « sûr » et « probable » sont toujours reconnues à la lecture).
+  statuts: { sur: 'présent', probable: 'à confirmer' },
   // Les événements changent rarement : on les relit à cet intervalle (les présences, elles, arrivent en direct).
   rafraichissementMs: 60000,
 };
@@ -41,12 +52,18 @@ const CONFIG = {
 /* Colonnes de la table Presences, à associer dans le panneau de configuration du widget. */
 const COLONNES_PRESENCES = [
   { name: 'evenement',   title: 'Événement',   type: 'Any',  description: 'Référence vers une ligne de la table Evenements' },
-  { name: 'utilisateur', title: 'Utilisateur', type: 'Any',  description: 'Référence vers une ligne de la table Utilisateurs' },
-  { name: 'statut',      title: 'Statut',      type: 'Any',  description: '« sûr » ou « probable »' },
-  { name: 'nom',         title: 'Nom',         type: 'Any',  description: 'Formule : $Utilisateur.Nom' },
-  { name: 'prenom',      title: 'Prénom',      type: 'Any',  description: 'Formule : $Utilisateur.Prenom' },
-  { name: 'logo',        title: 'Logo',        type: 'Any',  description: 'Formule : $Utilisateur.Logo', optional: true },
+  { name: 'utilisateur', title: 'Utilisateur', type: 'Any',  description: 'Référence vers une ligne de la table Annuaire' },
+  { name: 'statut',      title: 'Statut',      type: 'Any',  description: '« présent » ou « à confirmer »' },
+  { name: 'nom',         title: 'Nom',         type: 'Any',  description: 'Formule : $Utilisateur.nom' },
+  { name: 'prenom',      title: 'Prénom',      type: 'Any',  description: 'Formule : $Utilisateur.prenom' },
+  { name: 'logo',        title: 'Logo',        type: 'Any',  description: 'Formule : logo de l’établissement de l’utilisateur (voir README)', optional: true },
 ];
+
+/* Libellés affichés (les codes internes restent « sur » et « probable »). */
+const LIBELLES = {
+  sur:      { bouton: '✓ Présent',     badge: 'Présent',     resume: ['présent', 'présents'] },
+  probable: { bouton: '? À confirmer', badge: 'À confirmer', resume: ['à confirmer', 'à confirmer'] },
+};
 
 const JOURS_SEMAINE = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
 const MOIS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
@@ -88,8 +105,8 @@ const urlSure = (v) => (/^https?:\/\//i.test(texte(v)) ? texte(v) : '');
 
 function codeStatut(v) {
   const s = sansAccent(v);
-  if (s.startsWith('sur')) return 'sur';
-  if (s.startsWith('prob')) return 'probable';
+  if (/^(present|sur)/.test(s)) return 'sur';
+  if (/^(a confirmer|prob)/.test(s)) return 'probable';
   return null;
 }
 
@@ -170,30 +187,50 @@ async function chargerEvenements() {
   rendre();
 }
 
+/** Logo de l’établissement d’une personne de l’Annuaire : par nom de domaine, sinon par nom. */
+async function chercherLogo(personne) {
+  try {
+    const c = CONFIG.annuaire;
+    const e = CONFIG.etablissements;
+    const domaine = sansAccent(personne[c.domaine]);
+    const nom = sansAccent(personne[c.etablissement]);
+    const lignes = lignesDeTable(await grist.docApi.fetchTable(CONFIG.tables.etablissements));
+    const trouve = lignes.find((l) => domaine && sansAccent(l[e.domaine]) === domaine)
+      || lignes.find((l) => nom && sansAccent(l[e.nom]) === nom);
+    return trouve ? trouve[e.logo] : null;
+  } catch (err) {
+    console.error('Logos des établissements indisponibles', err);
+    return null;
+  }
+}
+
 /**
  * Qui suis-je ? Grist n’indique pas l’utilisateur au widget. On s’appuie donc sur les règles
- * d’accès de la table ACL : chacun n’y voit que sa propre ligne (règle `rec.Email == user.Email`).
+ * d’accès de l’Annuaire : l’e-mail n’y est lisible que sur sa propre ligne (règle `rec.email == user.Email`),
+ * qu’il s’agisse de la colonne seule (les autres lignes sont alors masquées) ou de la table entière
+ * (on ne voit alors que sa ligne). La ligne dont l’e-mail est lisible est la mienne.
  * C’est la seule fonction à adapter si l’identification se fait autrement.
  */
 async function chargerMoi() {
   try {
-    const lignes = lignesDeTable(await grist.docApi.fetchTable(CONFIG.tables.utilisateurs));
-    if (lignes.length === 1) {
-      const c = CONFIG.utilisateurs;
-      const l = lignes[0];
-      etat.moi = { id: l.id, nom: texte(l[c.nom]), prenom: texte(l[c.prenom]), logo: l[c.logo] };
+    const c = CONFIG.annuaire;
+    const lignes = lignesDeTable(await grist.docApi.fetchTable(CONFIG.tables.annuaire));
+    const miennes = lignes.filter((l) => typeof l[c.email] === 'string' && l[c.email].trim());
+    if (miennes.length === 1) {
+      const l = miennes[0];
+      etat.moi = { id: l.id, nom: texte(l[c.nom]), prenom: texte(l[c.prenom]), logo: await chercherLogo(l) };
       etat.messageMoi = '';
       await preparerJeton([etat.moi.logo]);   // avant le premier affichage du logo
     } else {
       etat.moi = null;
-      etat.messageMoi = lignes.length
-        ? 'Vous voyez plusieurs personnes dans la table ACL : une règle d’accès doit limiter chacun à sa propre ligne.'
+      etat.messageMoi = miennes.length
+        ? `Plusieurs e-mails sont lisibles dans la table « ${CONFIG.tables.annuaire} » : une règle d’accès doit réserver la colonne e-mail à sa propre ligne.`
         : 'Vous n’êtes pas reconnu(e) : connectez-vous avec votre compte pour indiquer votre présence.';
     }
   } catch (err) {
     console.error(err);
     etat.moi = null;
-    etat.messageMoi = `Table « ${CONFIG.tables.utilisateurs} » inaccessible : identification impossible.`;
+    etat.messageMoi = `Table « ${CONFIG.tables.annuaire} » inaccessible : identification impossible.`;
   }
   rendre();
 }
@@ -255,7 +292,7 @@ function monStatut(evenementId) {
   return miennes.some((p) => p.statut === 'sur') ? 'sur' : miennes.length ? 'probable' : null;
 }
 
-/** Participants d’un événement, sûrs d’abord, moi inclus avec mon choix à jour. */
+/** Participants d’un événement, présents d’abord, moi inclus avec mon choix à jour. */
 function participantsDe(evenementId) {
   const parPersonne = new Map();
   for (const p of etat.presences) {
@@ -290,7 +327,7 @@ async function ecrirePresence(evenementId, cible) {
   }
 }
 
-/** Clic sur « Sûr » ou « Probable » : reclique pour annuler, clique l’autre pour changer. */
+/** Clic sur « Présent » ou « À confirmer » : reclique pour annuler, clique l’autre pour changer. */
 async function choisir(evenementId, valeur) {
   if (!etat.moi || etat.verrous.has(evenementId)) return;
   const cible = !valeur || valeur === monStatut(evenementId) ? null : valeur;
@@ -320,8 +357,9 @@ function infosJour(iso) {
   return { nom: JOURS_SEMAINE[d.getDay()], numero: d.getDate(), mois: MOIS[d.getMonth()] };
 }
 
-function pluriel(n, mot) {
-  return `${n} ${mot}${n > 1 ? 's' : ''}`;
+/** nombre(2, ['présent', 'présents']) -> '2 présents' */
+function nombre(n, [singulier, pluriel]) {
+  return `${n} ${n > 1 ? pluriel : singulier}`;
 }
 
 function afficherMessage(msg, erreur = false) {
@@ -353,11 +391,11 @@ function rendreParticipants(evenement) {
   const sur = gens.filter((p) => p.statut === 'sur').length;
   const probable = gens.length - sur;
   const resumeTexte = gens.length
-    ? [sur && pluriel(sur, 'sûr'), probable && pluriel(probable, 'probable')].filter(Boolean).join(', ')
+    ? [sur && nombre(sur, LIBELLES.sur.resume), probable && nombre(probable, LIBELLES.probable.resume)].filter(Boolean).join(', ')
     : 'Personne pour l’instant';
-  // « ✓ 5 sûrs  ? 1 probable » ; sur les colonnes étroites, seuls les symboles et les nombres restent (CSS)
-  const compte = (classe, symbole, n, mot) => (n ? `<span class="compte compte--${classe}">${symbole}${NBSP}${n}<span class="compte__mot"> ${mot}${n > 1 ? 's' : ''}</span></span>` : '');
-  const resume = gens.length ? compte('sur', '✓', sur, 'sûr') + compte('probable', '?', probable, 'probable') : 'Personne pour l’instant';
+  // « ✓ 5 présents  ? 1 à confirmer » ; sur les colonnes étroites, seuls les symboles et les nombres restent (CSS)
+  const compte = (classe, symbole, n) => (n ? `<span class="compte compte--${classe}">${symbole}${NBSP}${n}<span class="compte__mot"> ${n > 1 ? LIBELLES[classe].resume[1] : LIBELLES[classe].resume[0]}</span></span>` : '');
+  const resume = gens.length ? [compte('sur', '✓', sur), compte('probable', '?', probable)].filter(Boolean).join(' ') : 'Personne pour l’instant';
   const visibles = gens.slice(0, 4);
   const reste = gens.length - visibles.length;
   const ouvert = etat.ouverts.has(evenement.id);
@@ -379,7 +417,7 @@ function rendreDetail(evenement) {
       ${gens.length ? `<ul class="liste-qui">${gens.map((p) => `
         <li>${rendreAvatar(p)}
           <span class="liste-qui__nom">${echapper(nomComplet(p) || 'Anonyme')}${p.moi ? ' (vous)' : ''}</span>
-          <span class="badge${p.statut === 'sur' ? ' badge--sur' : ''}">${p.statut === 'sur' ? 'Sûr' : 'Probable'}</span>
+          <span class="badge${p.statut === 'sur' ? ' badge--sur' : ''}">${LIBELLES[p.statut].badge}</span>
         </li>`).join('')}</ul>` : ''}
       ${infos.length ? `<dl class="detail__infos">${infos.map(([k, v]) => `<dt>${k}</dt><dd>${echapper(v)}</dd>`).join('')}</dl>` : ''}
       ${evenement.description ? `<p>${echapper(evenement.description)}</p>` : ''}
@@ -397,7 +435,7 @@ function rendreActions(evenement) {
   return `
     <div class="evt__actions">
       <div class="choix" role="group" aria-label="Ma présence : ${echapper(evenement.titre)}">
-        ${bouton('sur', '✓ Sûr')}${bouton('probable', '? Probable')}
+        ${bouton('sur', LIBELLES.sur.bouton)}${bouton('probable', LIBELLES.probable.bouton)}
       </div>
       ${mien && !bloque ? `<button class="retirer" type="button" data-action="choisir" data-evt="${evenement.id}" data-focus="retirer-${evenement.id}">Retirer</button>` : ''}
     </div>`;

@@ -1,6 +1,6 @@
 # Planning de la Semaine de l’innovation 2026 — widget Grist
 
-Widget personnalisé pour [Grist](https://www.getgrist.com) : le planning de la 3e Semaine de l’innovation (23 - 27 novembre 2026, métropole bordelaise), avec, pour chaque événement, les personnes qui comptent y aller (**sûr** ou **probable**) et le logo de leur établissement. Les changements des autres apparaissent en direct.
+Widget personnalisé pour [Grist](https://www.getgrist.com) : le planning de la 3e Semaine de l’innovation (23 - 27 novembre 2026, métropole bordelaise), avec, pour chaque événement, les personnes qui comptent y aller (**présent** ou **à confirmer**) et le logo de leur établissement. Les changements des autres apparaissent en direct.
 
 HTML, CSS et JavaScript natifs : la seule dépendance est le script officiel `grist-plugin-api.js`.
 
@@ -12,49 +12,59 @@ HTML, CSS et JavaScript natifs : la seule dépendance est le script officiel `gr
 | `data/build_xlsx.py` | génère l’Excel (et les données de test) à partir de la liste des événements |
 | `dev/` | faux Grist pour tester dans un navigateur, sans Grist |
 
-## Mise en place dans Grist
+## Tables Grist
 
-### 1. Table `Evenements`
-Importer `data/Evenements_Semaine_Innovation_2026.xlsx` (une feuille : `Evenements`). Vérifier que `Jour` est de type **Date**. Les colonnes (`Jour`, `Debut`, `Fin`, `Titre`, `Sous_titre`, `Type`, `Temps_fort`, `Lieu`, `Ville`, `Adresse`, `Public`, `Description`, `Lien`) sont celles que lit le widget : ne pas les renommer.
+| Table | Rôle | Colonnes lues par le widget |
+| --- | --- | --- |
+| `Evenements` | import de l’Excel | `Jour` (Date), `Debut`, `Fin`, `Titre`, `Sous_titre`, `Type`, `Temps_fort`, `Lieu`, `Ville`, `Adresse`, `Public`, `Description`, `Lien` |
+| `Annuaire` | une ligne par personne | `email`, `nom`, `prenom`, `nom_de_domaine`, `Etablissement` (texte) |
+| `Etablissement` | un logo par établissement | `Nom_complet`, `nom_de_domaine`, `Logo` (pièce jointe) |
+| `Presences` | une ligne par personne et par événement | voir ci-dessous |
 
-### 2. Table `Utilisateurs` (la table ACL)
-Une ligne par personne : `Email`, `Nom`, `Prenom`, `Logo` (lien web `https://…` ou colonne Pièces jointes).
-
-Grist ne dit pas au widget qui est connecté. Le widget le déduit de cette table : **chaque personne ne doit y voir que sa propre ligne**. Dans *Règles d’accès* → table `Utilisateurs` : règle `rec.Email == user.Email` → lecture autorisée, et règle par défaut → lecture refusée.
-
-### 3. Table `Presences`
-Une ligne par personne et par événement.
+### Table `Presences` (à créer)
 
 | Colonne | Type | Contenu |
 | --- | --- | --- |
 | `Evenement` | Référence → `Evenements` | rempli par le widget |
-| `Utilisateur` | Référence → `Utilisateurs` | rempli par le widget |
-| `Statut` | Choix : `sûr`, `probable` | rempli par le widget |
-| `Nom` | formule | `$Utilisateur.Nom` |
-| `Prenom` | formule | `$Utilisateur.Prenom` |
-| `Logo` | formule | `$Utilisateur.Logo` |
+| `Utilisateur` | Référence → `Annuaire` | rempli par le widget |
+| `Statut` | Choix : `présent`, `à confirmer` | rempli par le widget |
+| `Nom` | formule | `$Utilisateur.nom` |
+| `Prenom` | formule | `$Utilisateur.prenom` |
+| `Logo` | formule | voir ci-dessous |
 
-Les trois colonnes en formule permettent à tout le monde de voir les noms et logos sans lire la table `Utilisateurs`.
+Formule de `Logo` (l’établissement se retrouve par le nom de domaine, sinon par son nom) :
 
-Recommandé : dans les règles d’accès de `Presences`, lecture pour tous, mais création / modification / suppression seulement pour ses propres lignes (`newRec.Utilisateur.Email == user.Email` à la création, `rec.Utilisateur.Email == user.Email` ensuite), pour que personne ne puisse cocher à la place d’un autre.
+```python
+e = Etablissement.lookupOne(nom_de_domaine=$Utilisateur.nom_de_domaine) or Etablissement.lookupOne(Nom_complet=$Utilisateur.Etablissement)
+return e.Logo
+```
 
-### 4. Ajouter le widget
+Ces trois colonnes en formule permettent à tout le monde de voir les noms et les logos des autres sans avoir à lire l’`Annuaire`.
+
+### Règles d’accès
+
+- **Reconnaître la personne connectée.** Grist ne dit pas au widget qui est connecté : il le déduit de l’`Annuaire`, où la ligne dont l’e-mail est lisible est la sienne. Il faut donc que `email` ne soit lisible que sur sa propre ligne : règle `rec.email == user.Email` → lecture autorisée, règle par défaut → lecture refusée, soit sur la colonne `email`, soit sur toute la table. Si plusieurs e-mails sont lisibles, ou aucun, le widget passe en lecture seule et l’explique en haut de page.
+- **Recommandé, sur `Presences`** : lecture pour tous, mais création / modification / suppression seulement pour ses propres lignes (`newRec.Utilisateur.email == user.Email` à la création, `rec.Utilisateur.email == user.Email` ensuite), pour que personne ne puisse cocher à la place d’un autre.
+
+## Ajouter le widget
 1. Sur une page, *Ajouter un widget* → *Personnalisé*.
 2. Données : la table **`Presences`** (c’est elle qui arrive en direct dans le widget).
-3. URL du widget : celle de `index.html` hébergé (voir plus bas). Niveau d’accès : **Accès complet au document** (le widget lit `Evenements` et `Utilisateurs`).
+3. URL du widget : celle de `index.html` hébergé (voir plus bas). Niveau d’accès : **Accès complet au document** (le widget lit aussi `Evenements`, `Annuaire` et `Etablissement`).
 4. Dans le panneau du widget, associer les six colonnes proposées : Événement, Utilisateur, Statut, Nom, Prénom, Logo.
 
 ## Hébergement
 GitHub Pages : *Settings* → *Pages* → *Deploy from a branch* → `main`, dossier `/ (root)`. L’URL du widget est alors `https://<compte>.github.io/<dépôt>/`.
 
-## Changer un nom de table ou de colonne
-Tout est dans le bloc `CONFIG` en haut de `widget.js` : nom de la table `Utilisateurs`, noms de ses colonnes (`Nom`, `Prenom`, `Logo`), valeurs de statut. Les colonnes de `Presences` se règlent directement dans le panneau du widget, sans toucher au code.
+## Changer un nom de table ou de colonne, ou un libellé
+- Noms de tables et de colonnes : bloc `CONFIG` en haut de `widget.js`. Les colonnes de `Presences` se règlent directement dans le panneau du widget, sans toucher au code.
+- Valeurs écrites dans `Statut` : `CONFIG.statuts` (les anciennes valeurs « sûr » et « probable » sont toujours reconnues à la lecture).
+- Textes des boutons et des compteurs : `LIBELLES`, juste en dessous de `COLONNES_PRESENCES`.
 
 ## Tester sans Grist
 ```sh
 python3 -m http.server 8000
 ```
-puis ouvrir <http://localhost:8000/dev/>. Le faux Grist simule des participants (bouton « Un autre participant bouge » pour voir la mise à jour en direct). Options d’URL : `?moi=2` (autre utilisateur), `?anonyme` (personne non reconnue), `?vide` (aucune présence).
+puis ouvrir <http://localhost:8000/dev/>. Le faux Grist reprend la structure des tables ci-dessus et simule des participants (bouton « Un autre participant bouge » pour voir la mise à jour en direct). Options d’URL : `?moi=2` (autre personne), `?restreint` (l’Annuaire ne montre que sa ligne), `?ambigu` (tous les e-mails lisibles), `?anonyme` (personne non reconnue), `?vide` (aucune présence).
 
 ## Mettre à jour les événements
 Modifier la liste `EVENEMENTS` dans `data/build_xlsx.py` puis `python3 data/build_xlsx.py` (nécessite `openpyxl`), ou modifier directement la table `Evenements` dans Grist : le widget relit les événements chaque minute.
