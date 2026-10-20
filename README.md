@@ -38,7 +38,7 @@ Colonnes créées par le widget dans `Participations` :
 | `Email` | texte, formule « à la création » | `user.Email` : l’e-mail de la personne qui a coché |
 | `Utilisateur` | référence → `Annuaire`, formule | la ligne de l’`Annuaire` qui a cet e-mail (sans tenir compte des majuscules) |
 
-`Email` et `Utilisateur` se remplissent seuls à la création de la ligne : le widget ne les écrit pas, donc personne ne peut cocher à la place d’un autre. Le logo d’une personne est celui de son établissement, retrouvé par le nom de domaine (sinon par le nom de l’établissement). Le lieu de chaque événement est un lien vers Google Maps (recherche sur l’adresse, sinon sur le lieu et la ville), qui s’ouvre dans un nouvel onglet. Les présences arrivent dans le widget en direct, sans relecture. Dans `Participations`, vous pouvez régler l’affichage de `Evenement` sur `Titre` pour y lire les noms des événements.
+`Email` et `Utilisateur` se remplissent seuls à la création de la ligne : le widget ne les écrit pas, donc personne ne peut cocher à la place d’un autre depuis le widget (pour l’empêcher aussi par l’API de Grist, voir « Règles d’accès »). Le logo d’une personne est celui de son établissement, retrouvé par le nom de domaine (sinon par le nom de l’établissement). Le lieu de chaque événement est un lien vers Google Maps (recherche sur l’adresse, sinon sur le lieu et la ville), qui s’ouvre dans un nouvel onglet. Les présences arrivent dans le widget en direct, sans relecture. Dans `Participations`, vous pouvez régler l’affichage de `Evenement` sur `Titre` pour y lire les noms des événements.
 
 **Pourquoi pas dans l’`Annuaire` ?** Si le document déclare un *attribut utilisateur* sur l’`Annuaire` (règles d’accès, par exemple `acl` : `user.Email` → `Annuaire.email`), Grist recharge la page de la personne dès que sa propre ligne de l’`Annuaire` change. Les présences ne passent donc jamais par l’`Annuaire`. Une première version y enregistrait deux colonnes (`Evenements_presents` et `Evenements_a_confirmer`) : si elles existent encore, vous pouvez les supprimer.
 
@@ -57,7 +57,25 @@ Le widget a seulement besoin que :
 - tout le monde puisse **lire** `Annuaire`, `Etablissement`, `Evenements` et `Participations` ;
 - chaque éditeur puisse **ajouter et supprimer des lignes** dans `Participations` (c’est le cas tant qu’aucune règle ne l’interdit).
 
-Recommandé, pour qu’on ne puisse pas modifier ou supprimer les présences des autres : sur `Participations`, modification et suppression autorisées seulement si `rec.Email == user.Email` (les propriétaires : `user.Access in [OWNER]` en premier). Sans cette règle, personne ne peut cocher à la place d’un autre *depuis le widget*, mais un éditeur qui appelle l’API de Grist à la main pourrait écrire une autre adresse dans `Email` ou modifier la ligne de quelqu’un.
+Sans règle sur `Participations`, le widget interdit de cocher à la place d’un autre, mais seulement dans son interface : un éditeur qui appelle l’API de Grist à la main peut écrire l’adresse d’un autre ou modifier et supprimer les présences des autres. Les règles ci-dessous (celles de l’audit de sécurité du 20/10/2026, § 6, testées avec le widget) l’empêchent sans rien changer à l’usage.
+
+**`Participations`** (« Ajouter des règles pour la table », colonnes « Toutes »), cinq lignes dans cet ordre ; ne cocher que les droits indiqués :
+
+| # | Condition | Droits |
+| --- | --- | --- |
+| 1 | `user.Access in [OWNER]` | R U C D autorisés |
+| 2 | `rec.Email == user.Email and newRec.Email == user.Email` | U autorisé |
+| 3 | `rec.Email == user.Email` | D autorisé |
+| 4 | `newRec.Email == user.Email` | C autorisé |
+| 5 | Tous les autres | R autorisé ; U, C, D refusés |
+
+Chacun lit toutes les présences, ne crée que des lignes à son e-mail, ne modifie que les siennes (sans changer l’e-mail) et ne supprime que les siennes. La ligne éphémère de reconnaissance continue de fonctionner.
+
+**`Annuaire`, `Etablissement`, `Evenements`** : propriétaires (`user.Access in [OWNER]`) : tout ; tous les autres : lecture seule. En particulier, supprimer la règle qui laisse chacun modifier sa propre fiche de l’`Annuaire` (`rec.email == user.Email`) : le widget n’y écrit plus, et changer son e-mail permettrait de se faire passer pour une autre personne.
+
+**Attribut utilisateur** (`acl`) : s’il n’est utilisé par aucune règle, le supprimer ; il fait recharger la page d’une personne dès que sa ligne de l’`Annuaire` change.
+
+Le reste (journaux de synchronisation, structure du document, masquer les e-mails, CSP, partage) est dans l’audit de sécurité, § 6 ; les règles ci-dessus sont reprises à l’identique de ses points B, D et E. Les tests (`grist-reel.test.js`) rejouent ces règles dans un vrai Grist.
 
 ## Affichage
 
@@ -82,7 +100,7 @@ La batterie (`npm test`, soit `node --test dev/tests/*.test.js`) a trois étages
 | --- | --- | --- |
 | Unitaire | `dev/tests/unitaires.test.js` | les fonctions de `widget.js` (lecture des valeurs Grist, dates et heures, références `{ tableId, rowId }`, logos, établissements, participants, regroupements, liens de carte) |
 | Faux Grist | `dev/tests/faux-grist.test.js` | l’écran dans un navigateur : jours, filtre, boutons de choix, compteurs, liste des participants, messages d’erreur, toutes les options `?…` ci-dessous |
-| Vrai Grist | `dev/tests/grist-reel.test.js` | le widget dans l’image officielle de Grist, avec plusieurs personnes connectées en même temps : première ouverture, enregistrement, doublons et lignes oubliées, mise à jour en direct, règles d’accès d’Antoine (attribut utilisateur `acl`) sans rechargement de la page, lecteur, personne absente de l’Annuaire, logos en pièces jointes, lien de carte |
+| Vrai Grist | `dev/tests/grist-reel.test.js` | le widget dans l’image officielle de Grist, avec plusieurs personnes connectées en même temps : première ouverture, enregistrement, doublons et lignes oubliées, mise à jour en direct, règles d’accès d’Antoine (attribut utilisateur `acl`) sans rechargement de la page, règles recommandées ci-dessus (impossible d’écrire à la place d’un autre), lecteur, personne absente de l’Annuaire, logos en pièces jointes, lien de carte |
 
 L’étage « vrai Grist » est ignoré tant que Grist ne répond pas. Pour le lancer (Docker requis, image `gristlabs/grist`) :
 

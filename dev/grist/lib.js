@@ -2,7 +2,7 @@
    avec la même structure que celui d'Antoine (Annuaire, Etablissement, Evenements, Participations). */
 const GRIST = process.env.GRIST_URL || 'http://127.0.0.1:8484';
 const WIDGET = process.env.WIDGET_URL || 'http://127.0.0.1:8765/index.html';
-const PROPRIETAIRE = 'antoine.philippon@u-bordeaux.fr';
+const PROPRIETAIRE = 'alix.marchand@u-bordeaux.fr';
 
 const sessions = new Map();
 

@@ -237,11 +237,11 @@ describe('présences', () => {
     etat.moi = d.moi; etat.presences = d.presences; etat.choixEnCours = new Map(d.choix || []);
     try { return (0, eval)(c); } finally { Object.assign(etat, sauve); }
   }, [donnees, calcul]);
-  const moi = { id: 1, prenom: 'Antoine', nom: 'Philippon', logo: null };
+  const moi = { id: 1, prenom: 'Alix', nom: 'Marchand', logo: null };
   const p = (utilisateur, prenom, nom, evenement, statut) => ({ id: utilisateur * 100 + evenement, evenement, utilisateur, statut, prenom, nom, logo: null });
 
   test('statutEnregistre : « sur » dès qu\'une de mes lignes l\'est, « probable » sinon, null sans ligne', async () => {
-    const presences = [p(1, 'Antoine', 'Philippon', 7, 'probable'), p(1, 'Antoine', 'Philippon', 7, 'sur'), p(1, 'Antoine', 'Philippon', 8, 'probable'), p(2, 'Léa', 'Dupont', 9, 'sur')];
+    const presences = [p(1, 'Alix', 'Marchand', 7, 'probable'), p(1, 'Alix', 'Marchand', 7, 'sur'), p(1, 'Alix', 'Marchand', 8, 'probable'), p(2, 'Léa', 'Dupont', 9, 'sur')];
     assert.equal(await avec({ moi, presences }, 'statutEnregistre(7)'), 'sur');
     assert.equal(await avec({ moi, presences }, 'statutEnregistre(8)'), 'probable');
     assert.equal(await avec({ moi, presences }, 'statutEnregistre(9)'), null);   // la ligne d'une autre personne n'est pas la mienne
@@ -249,7 +249,7 @@ describe('présences', () => {
   });
 
   test('monStatut : mon dernier clic l\'emporte sur ce qui est enregistré, y compris un retrait (null)', async () => {
-    const presences = [p(1, 'Antoine', 'Philippon', 7, 'sur')];
+    const presences = [p(1, 'Alix', 'Marchand', 7, 'sur')];
     assert.equal(await avec({ moi, presences }, 'monStatut(7)'), 'sur');
     assert.equal(await avec({ moi, presences, choix: [[7, { statut: 'probable' }]] }, 'monStatut(7)'), 'probable');
     assert.equal(await avec({ moi, presences, choix: [[7, { statut: null }]] }, 'monStatut(7)'), null);
@@ -262,11 +262,11 @@ describe('présences', () => {
       p(2, 'Léa', 'Dupont', 9, 'sur'),                                                 // autre événement
       p(5, 'Inès', 'Moreau', 7, 'probable'), p(5, 'Inès', 'Moreau', 7, 'sur'),         // doublon : « présent » gagne
       p(6, 'Paul', 'Garcia', 7, 'sur'), p(6, 'Paul', 'Garcia', 7, 'probable'),
-      p(1, 'Antoine', 'Philippon', 7, 'probable'),                                     // ma ligne enregistrée : remplacée par mon choix
+      p(1, 'Alix', 'Marchand', 7, 'probable'),                                     // ma ligne enregistrée : remplacée par mon choix
     ];
     const gens = await avec({ moi, presences, choix: [[7, { statut: 'sur' }]] }, 'participantsDe(7)');
     assert.deepEqual(gens.map((g) => [`${g.prenom} ${g.nom}`, g.statut, g.moi]), [
-      ['Antoine Philippon', 'sur', true], ['Paul Garcia', 'sur', false], ['Hugo Leroy', 'sur', false], ['Inès Moreau', 'sur', false], ['Zoé Zola', 'sur', false], ['Léa Dupont', 'probable', false],
+      ['Alix Marchand', 'sur', true], ['Paul Garcia', 'sur', false], ['Hugo Leroy', 'sur', false], ['Inès Moreau', 'sur', false], ['Zoé Zola', 'sur', false], ['Léa Dupont', 'probable', false],
     ]);
     assert.deepEqual((await avec({ moi, presences }, 'participantsDe(9)')).map((g) => g.prenom), ['Léa']);
     assert.deepEqual(await avec({ moi, presences }, 'participantsDe(99)'), []);

@@ -13,10 +13,10 @@ const ETABLISSEMENTS = [
   ['INRAE', 'IN', 'inrae.fr'],
 ];
 
-/** [prénom, nom, domaine, établissement] : Antoine (propriétaire) et Jessica (éditrice) sont les deux premiers. */
+/** [prénom, nom, domaine, établissement] : Alix (propriétaire) et Jeanne (éditrice) sont les deux premiers. */
 const PERSONNES = [
-  ['Antoine', 'Philippon', 'u-bordeaux.fr', 'Université de Bordeaux'],
-  ['Jessica', 'De Bidegain', 'u-bordeaux.fr', 'Université de Bordeaux'],
+  ['Alix', 'Marchand', 'u-bordeaux.fr', 'Université de Bordeaux'],
+  ['Jeanne', 'Delmas', 'u-bordeaux.fr', 'Université de Bordeaux'],
   ['Karim', 'Benali', 'bordeaux-inp.fr', 'Bordeaux INP'],
   ['Léa', 'Dupont', 'u-bordeaux-montaigne.fr', 'Université Bordeaux Montaigne'],
   ['Hugo', 'Leroy', 'sciencespo-bordeaux.fr', 'Sciences Po Bordeaux'],
@@ -103,6 +103,29 @@ async function installerReglesAntoine(doc) {
 }
 
 module.exports.installerReglesAntoine = installerReglesAntoine;
+
+/**
+ * Les règles recommandées dans le README (audit de sécurité, § 6 B et D) : Annuaire, Etablissement et Evenements en lecture
+ * seule sauf pour les propriétaires, et sur Participations chacun ne crée, modifie et supprime que les lignes à son e-mail.
+ * Sans attribut utilisateur.
+ */
+async function installerReglesRecommandees(doc) {
+  const [annuaire, etablissement, evenements, participations] = await appliquer(PROPRIETAIRE, doc, ['Annuaire', 'Etablissement', 'Evenements', 'Participations']
+    .map((tableId) => ['AddRecord', '_grist_ACLResources', null, { tableId, colIds: '*' }]));
+  const regle = (resource, aclFormula, permissionsText) => ({ resource, aclFormula, permissionsText, memo: '' });
+  const lectureSeule = (resource) => [regle(resource, 'user.Access in [OWNER]', '+R+U+C+D'), regle(resource, '', '+R-U-C-D')];
+  const rules = [
+    ...lectureSeule(annuaire), ...lectureSeule(etablissement), ...lectureSeule(evenements),
+    regle(participations, 'user.Access in [OWNER]', '+R+U+C+D'),
+    regle(participations, 'rec.Email == user.Email and newRec.Email == user.Email', '+U'),
+    regle(participations, 'rec.Email == user.Email', '+D'),
+    regle(participations, 'newRec.Email == user.Email', '+C'),
+    regle(participations, '', '+R-U-C-D'),
+  ].map((r, i) => ({ ...r, rulePos: i + 1 }));
+  await appliquer(PROPRIETAIRE, doc, rules.map((r) => ['AddRecord', '_grist_ACLRules', null, r]));
+}
+
+module.exports.installerReglesRecommandees = installerReglesRecommandees;
 
 /** Donne un logo (pièce jointe Grist) aux deux premiers établissements : le logo de la Semaine de l'innovation. */
 async function ajouterLogos(doc) {

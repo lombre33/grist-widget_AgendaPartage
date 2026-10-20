@@ -10,7 +10,7 @@ docker rm -f "$NOM" >/dev/null 2>&1 || true
 docker run -d --name "$NOM" --network host \
   -e PORT=8484 -e APP_HOME_URL=http://127.0.0.1:8484 \
   -e GRIST_SANDBOX_FLAVOR=unsandboxed \
-  -e GRIST_IN_SERVICE=true -e GRIST_ADMIN_EMAIL=antoine.philippon@u-bordeaux.fr \
+  -e GRIST_IN_SERVICE=true -e GRIST_ADMIN_EMAIL=alix.marchand@u-bordeaux.fr \
   -e GRIST_FORWARD_AUTH_HEADER=X-Forwarded-User \
   -e GRIST_SINGLE_ORG=docs -e GRIST_ORG_IN_PATH=false \
   gristlabs/grist:latest >/dev/null
