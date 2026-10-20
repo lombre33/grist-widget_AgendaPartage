@@ -76,7 +76,7 @@ const CIBLES = [
 ];
 
 /* Numéro de version, affiché en bas de page : il permet de vérifier quelle version Grist a chargée (cache du navigateur). */
-const VERSION = '2026-10-20 · m';
+const VERSION = '2026-10-20 · n';
 
 const JOURS_SEMAINE = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
 const MOIS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
@@ -726,6 +726,7 @@ function afficherMessage(msg, erreur = false, detail = '') {
 function messageSimple(technique) {
   const cas = [
     [/^Il manque /, 'Le planning n’est pas encore prêt à enregistrer les présences : la configuration du document est incomplète. Prévenez l’organisateur.'],
+    [/inaccessible : identification impossible/, 'Le planning est en lecture seule. Pour indiquer votre présence, connectez-vous à Grist avec votre adresse professionnelle : elle doit figurer dans l’annuaire du document.'],
     [/^Table « .+ » (introuvable|inaccessible)/, 'Le planning n’est pas disponible pour le moment. Prévenez l’organisateur.'],
     [/^Impossible de lire la table/, 'Le planning est momentanément indisponible. Réessayez dans un instant ou prévenez l’organisateur.'],
     [/^Impossible de vous reconnaître/, 'Vous n’êtes pas reconnu(e) pour l’instant : le planning reste en lecture seule. Prévenez l’organisateur.'],

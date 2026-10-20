@@ -42,7 +42,7 @@ async function connecter(contexte, utilisateur) {
  */
 async function contexteNavigateur(navigateur, utilisateur, { apiEval = true, scriptApi, ...options } = {}) {
   const contexte = await navigateur.newContext({ viewport: { width: 1300, height: 900 }, ...options });
-  await connecter(contexte, utilisateur);
+  if (utilisateur) await connecter(contexte, utilisateur);   // sans adresse : personne anonyme (document ouvert à tout le monde)
   const brut = scriptApi || await (await fetch(`${GRIST}/grist-plugin-api.js`)).text();
   const script = apiEval && !scriptApi ? `eval(${JSON.stringify(brut)});` : brut;   // { scriptApi } : texte à servir tel quel (par exemple le vrai script)
   await contexte.route('https://docs.getgrist.com/grist-plugin-api.js', (r) => r.fulfill({ contentType: 'text/javascript', body: script }));

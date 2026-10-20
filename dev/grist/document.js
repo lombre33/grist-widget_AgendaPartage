@@ -137,6 +137,36 @@ async function installerReglesRecommandees(doc) {
 
 module.exports.installerReglesRecommandees = installerReglesRecommandees;
 
+/**
+ * Document partagé en édition à « toute personne disposant du lien » (README, « Partager sans ajouter chaque personne ») : les règles
+ * recommandées, plus l'attribut « acl » et trois règles qui réservent l'Annuaire et l'écriture dans Participations aux personnes
+ * de l'Annuaire. Une personne anonyme ou absente de l'Annuaire lit le planning mais ne voit ni les personnes, ni les e-mails, et n'écrit rien.
+ * `user.acl.id == 0` ne convient pas : l'identifiant vaut None quand aucune ligne ne correspond.
+ */
+async function installerReglesPartagePublic(doc) {
+  const [defaut, colonnes, annuaire, etablissement, evenements, participations] = await appliquer(PROPRIETAIRE, doc, [['*', '*'], ['Participations', 'Email,Utilisateur'], ['Annuaire', '*'],
+    ['Etablissement', '*'], ['Evenements', '*'], ['Participations', '*']].map(([tableId, colIds]) => ['AddRecord', '_grist_ACLResources', null, { tableId, colIds }]));
+  const regle = (resource, aclFormula, permissionsText, memo = '') => ({ resource, aclFormula, permissionsText, memo });
+  const horsAnnuaire = 'user.Access not in [OWNER] and not user.acl.id';
+  const rules = [
+    { resource: defaut, userAttributes: JSON.stringify({ name: 'acl', tableId: 'Annuaire', lookupColId: 'email', charId: 'Email' }), aclFormula: '', permissionsText: '', memo: '' },
+    regle(colonnes, horsAnnuaire, '-R'),
+    regle(annuaire, 'user.Access in [OWNER]', '+R+U+C+D'), regle(annuaire, horsAnnuaire, '-R-U-C-D'), regle(annuaire, '', '+R-U-C-D'),
+    regle(etablissement, 'user.Access in [OWNER]', '+R+U+C+D'), regle(etablissement, '', '+R-U-C-D'),
+    regle(evenements, 'user.Access in [OWNER]', '+R+U+C+D'), regle(evenements, '', '+R-U-C-D'),
+    regle(participations, 'user.Access in [OWNER]', '+R+U+C+D'),
+    regle(participations, horsAnnuaire, '-U-C-D'),
+    regle(participations, 'rec.Email == user.Email and newRec.Email == user.Email', '+U'),
+    regle(participations, 'rec.Email == user.Email', '+D'),
+    regle(participations, 'newRec.Email == user.Email', '+C'),
+    regle(participations, '', '+R-U-C-D'),
+    regle(defaut, 'user.Access != OWNER', '-S'),   // « Autoriser les éditeurs à modifier la structure » décoché
+  ].map((r, i) => ({ ...r, rulePos: i + 1 }));
+  await appliquer(PROPRIETAIRE, doc, rules.map((r) => ['AddRecord', '_grist_ACLRules', null, r]));
+}
+
+module.exports.installerReglesPartagePublic = installerReglesPartagePublic;
+
 /** Donne un logo (pièce jointe Grist) aux deux premiers établissements : le logo de la Semaine de l'innovation. */
 async function ajouterLogos(doc) {
   const image = fs.readFileSync(path.join(__dirname, '../../assets/logo-semaine-innovation.jpg'));

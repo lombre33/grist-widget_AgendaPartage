@@ -78,6 +78,20 @@ Chacun lit toutes les présences, ne crée que des lignes à son e-mail, ne modi
 
 Le reste (journaux de synchronisation, structure du document, masquer les e-mails, CSP, partage) est dans l’audit de sécurité, § 6 ; les règles ci-dessus sont reprises à l’identique de ses points B, D et E. Les tests (`grist-reel.test.js`) rejouent ces règles dans un vrai Grist.
 
+### Partager sans ajouter chaque personne (accès public)
+
+Pour que n’importe qui puisse ouvrir le planning sans qu’on l’ajoute au document, mais que seules les personnes **connectées à Grist et présentes dans l’`Annuaire`** puissent cocher :
+
+1. Fenêtre **Partager** : accès public (« toute personne disposant du lien ») en **éditeur**. Il faut l’éditeur, pas le lecteur : un lecteur ne peut rien écrire, quelles que soient les règles. Les personnes déjà ajoutées une à une n’ont plus besoin de l’être.
+2. **Règles d’accès**, à ajouter aux règles ci-dessus (un éditeur qui n’est pas ajouté nommément est un éditeur comme les autres) :
+   - **Attribut utilisateur** `acl` : à conserver (nom `acl`, attribut `Email`, table `Annuaire`, colonne `email`) ; c’est lui qui dit si l’adresse de la personne est dans l’`Annuaire`. La règle qui la teste est `not user.acl.id` (pas `user.acl.id == 0` : l’identifiant vaut `None`, pas 0).
+   - **`Annuaire`**, une règle en deuxième position, après celle des propriétaires : `user.Access not in [OWNER] and not user.acl.id` → R, U, C, D tous refusés.
+   - **`Participations`**, une règle en deuxième position, après celle des propriétaires : `user.Access not in [OWNER] and not user.acl.id` → U, C, D refusés.
+   - **`Participations`, colonnes `Email` et `Utilisateur`** (« Ajouter des règles pour des colonnes ») : `user.Access not in [OWNER] and not user.acl.id` → R refusé. Les autres colonnes restent lisibles pour que la page du widget s’affiche.
+   - **Structure** : case « Autoriser les éditeurs à modifier la structure » décochée, et « Autoriser tout le monde à copier le document » décochée.
+
+Résultat (`grist-reel.test.js`, « document ouvert à tout le monde ») : une personne anonyme ou connectée mais absente de l’`Annuaire` voit le planning, avec un message qui l’invite à se connecter avec son adresse professionnelle ; elle ne voit ni les noms, ni les e-mails, ni qui participe, et ne peut rien écrire. Une personne de l’`Annuaire` coche comme avant. L’adresse de l’`Annuaire` doit être celle de la connexion à Grist (la casse est indifférente, pas les espaces autour).
+
 ## Publics visés (filtre « Pour qui ? »)
 
 La colonne facultative `Cibles` de `Evenements` (type **Liste de choix**, choix : `Pédagogie`, `Recherche`, `Étudiants`, `Entreprises`, `Personnels`) range chaque événement dans les publics des quatre plannings imprimés, plus `Personnels` pour la seule séance qu’aucun planning ne vise (le serious game « No wrong door », public du site : personnels administratifs) ; un événement peut avoir plusieurs publics. Une colonne Texte avec des valeurs séparées par des virgules (`Pédagogie, Recherche`) est lue aussi. Les valeurs sont dans `data/build_xlsx.py` (table `CIBLES`, d’après les plannings PDF) et dans l’Excel.
@@ -115,7 +129,7 @@ La batterie (`npm test`, soit `node --test dev/tests/*.test.js`) a trois étages
 | --- | --- | --- |
 | Unitaire | `dev/tests/unitaires.test.js` | les fonctions de `widget.js` (lecture des valeurs Grist, dates et heures, références `{ tableId, rowId }`, logos, établissements, participants, regroupements, liens de carte) et la politique de sécurité de `index.html` |
 | Faux Grist | `dev/tests/faux-grist.test.js` | l’écran dans un navigateur : jours, filtre, boutons de choix, compteurs, liste des participants, messages d’erreur, toutes les options `?…` ci-dessous |
-| Vrai Grist | `dev/tests/grist-reel.test.js` | le widget dans l’image officielle de Grist, avec plusieurs personnes connectées en même temps : première ouverture, enregistrement, doublons et lignes oubliées, mise à jour en direct, règles d’accès d’Antoine (attribut utilisateur `acl`) sans rechargement de la page, règles recommandées ci-dessus (impossible d’écrire à la place d’un autre), lecteur, personne absente de l’Annuaire, logos en pièces jointes, lien de carte, colonne `Email` masquée (aucune colonne en trop, aucune donnée perdue), politique de sécurité (CSP) active |
+| Vrai Grist | `dev/tests/grist-reel.test.js` | le widget dans l’image officielle de Grist, avec plusieurs personnes connectées en même temps : première ouverture, enregistrement, doublons et lignes oubliées, mise à jour en direct, règles d’accès d’Antoine (attribut utilisateur `acl`) sans rechargement de la page, règles recommandées ci-dessus (impossible d’écrire à la place d’un autre), document ouvert à tout le monde (anonyme, personne hors Annuaire, membre non ajouté nommément), lecteur, personne absente de l’Annuaire, logos en pièces jointes, lien de carte, colonne `Email` masquée (aucune colonne en trop, aucune donnée perdue), politique de sécurité (CSP) active |
 
 L’étage « vrai Grist » est ignoré tant que Grist ne répond pas. Pour le lancer (Docker requis, image `gristlabs/grist`) :
 

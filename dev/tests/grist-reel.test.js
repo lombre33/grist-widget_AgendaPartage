@@ -7,7 +7,7 @@ const { describe, test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { serveur, lancerNavigateur, attendre, pause, SEL } = require('./helpers');
 const { GRIST, PROPRIETAIRE, scriptApiReel, api, appliquer, lignes, partager, contexteNavigateur } = require('../grist/lib');
-const { creerDocument, installerReglesAntoine, installerReglesRecommandees, ajouterLogos, supprimerDocument } = require('../grist/document');
+const { creerDocument, installerReglesAntoine, installerReglesRecommandees, installerReglesPartagePublic, ajouterLogos, supprimerDocument } = require('../grist/document');
 
 const PROPRIO = PROPRIETAIRE;
 const JEANNE = 'jeanne.delmas@u-bordeaux.fr';
@@ -23,7 +23,7 @@ describe('vrai Grist', { skip: disponible ? false : `Grist ne répond pas sur ${
   after(async () => { await navigateur.close(); await srv.fermer(); for (const d of docs) await supprimerDocument(d); });
 
   /** Un document neuf (structure et données d'Antoine), partagé en édition avec les autres personnes de l'Annuaire. */
-  async function nouveau({ regles = false, recommandees = false, logos = false, preparer = true, cibles = true } = {}) {
+  async function nouveau({ regles = false, recommandees = false, publique = false, logos = false, preparer = true, cibles = true } = {}) {
     const r = await creerDocument(`Test ${new Date().toISOString()}`, { widget: `${srv.url}/index.html`, cibles });
     docs.push(r.doc);
     for (const email of r.emails.slice(1)) await partager(r.doc, email, 'editors');
@@ -33,6 +33,11 @@ describe('vrai Grist', { skip: disponible ? false : `Grist ne répond pas sur ${
     if (preparer) {   // première ouverture par le propriétaire : le widget crée les colonnes de Participations
       const { page } = await ouvrir(PROPRIO, r);
       await page.context().close();
+    }
+    if (publique) {   // partagé à « toute personne disposant du lien » : plus aucun partage nominatif, sauf le propriétaire
+      await installerReglesPartagePublic(r.doc);
+      const retraits = Object.fromEntries(r.emails.slice(1).map((email) => [email, null]));
+      await api(PROPRIO, 'PATCH', `/docs/${r.doc}/access`, { delta: { users: { ...retraits, 'everyone@getgrist.com': 'editors' } } });
     }
     return r;
   }
@@ -429,6 +434,59 @@ describe('vrai Grist', { skip: disponible ? false : `Grist ne répond pas sur ${
       assert.match(await widget.locator(SEL.etat).innerText(), /pas reconnu/);
       await attendre(async () => (await comptes(widget, 'Atelier Durable')).join() === '1,0');
       assert.equal((await participations(PROPRIO, doc)).length, 1);
+    });
+  });
+
+  describe('document ouvert à tout le monde, écriture réservée aux personnes de l\'Annuaire connectées', () => {
+    /** Appel de l'API sans aucune connexion (personne anonyme). */
+    const anonyme = async (methode, chemin, corps) => {
+      const r = await fetch(`${GRIST}/api${chemin}`, { method: methode, headers: { 'X-Requested-With': 'XMLHttpRequest', ...(corps ? { 'Content-Type': 'application/json' } : {}) }, body: corps ? JSON.stringify(corps) : undefined });
+      return r.status;
+    };
+
+    test('une personne anonyme voit le planning et un message l\'invite à se connecter ; elle ne lit ni n\'écrit rien d\'autre', async () => {
+      const doc = await nouveau({ publique: true });
+      const { widget } = await ouvrir(null, doc);
+      assert.equal(await widget.locator(SEL.evenement).count(), 30);
+      assert.equal(await widget.locator('button[data-action="choisir"]').count(), 0, 'pas de boutons de choix');
+      assert.match(await widget.locator(SEL.etat).innerText(), /connectez-vous à Grist avec votre adresse professionnelle/);
+      assert.equal(await widget.locator(SEL.etat).evaluate((e) => e.classList.contains('etat--erreur')), false, 'ce n\'est pas présenté comme une panne');
+      assert.equal(await anonyme('GET', `/docs/${doc.doc}/tables/Annuaire/records`), 403, 'l\'Annuaire reste caché');
+      assert.equal(await anonyme('GET', `/docs/${doc.doc}/tables/Evenements/records`), 200, 'le planning est public');
+      const lue = await (await fetch(`${GRIST}/api/docs/${doc.doc}/tables/Participations/records`, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })).json();
+      assert.ok(lue.records.every((l) => !('Email' in l.fields) && !('Utilisateur' in l.fields)), 'ni e-mail ni personne dans Participations');
+      assert.equal(await anonyme('POST', `/docs/${doc.doc}/apply`, [['AddRecord', 'Participations', null, { Statut: 'sur' }]]), 403);
+      assert.equal(await anonyme('POST', `/docs/${doc.doc}/apply`, [['RemoveTable', 'Etablissement']]), 403);
+      assert.equal(await anonyme('POST', `/docs/${doc.doc}/apply`, [['UpdateRecord', 'Evenements', 1, { Titre: 'x' }]]), 403);
+      assert.equal((await participations(PROPRIO, doc)).length, 0, 'aucune ligne laissée');
+    });
+
+    test('une personne de l\'Annuaire qui n\'est pas partagée nommément se reconnaît, coche, et les autres la voient', async () => {
+      const doc = await nouveau({ publique: true });
+      const j = await ouvrir(JEANNE, doc);
+      assert.equal(await j.widget.locator(SEL.nom).innerText(), 'Jeanne Delmas');
+      await carte(j.widget, 'Atelier Durable').locator(SEL.present).click();
+      await attendre(async () => (await miennes(PROPRIO, doc, JEANNE)).length === 1);
+      const k = await ouvrir(KARIM, doc);
+      await attendre(async () => (await comptes(k.widget, 'Atelier Durable')).join() === '1,0');
+      await carte(k.widget, 'Atelier Durable').locator(SEL.ligneParticipants).click();
+      assert.match(await carte(k.widget, 'Atelier Durable').locator(`${SEL.liste} li`).first().innerText(), /Jeanne Delmas/);
+      // elle ne peut pas écrire à la place d'un autre ni toucher à la structure
+      const evt = await evenementId(doc, 'Atelier Durable');
+      await assert.rejects(appliquer(JEANNE, doc.doc, [['AddRecord', 'Participations', null, { Email: KARIM, Evenement: evt, Statut: 'sur' }]]), /403/);
+      await assert.rejects(appliquer(JEANNE, doc.doc, [['RemoveTable', 'Etablissement']]), /403/);
+      await assert.rejects(appliquer(JEANNE, doc.doc, [['UpdateRecord', 'Evenements', 1, { Titre: 'x' }]]), /403/);
+    });
+
+    test('une personne connectée mais absente de l\'Annuaire voit le même message et n\'écrit rien', async () => {
+      const doc = await nouveau({ publique: true });
+      const { widget } = await ouvrir(INCONNU, doc);
+      assert.equal(await widget.locator(SEL.evenement).count(), 30);
+      assert.equal(await widget.locator('button[data-action="choisir"]').count(), 0);
+      assert.match(await widget.locator(SEL.etat).innerText(), /connectez-vous à Grist avec votre adresse professionnelle/);
+      await assert.rejects(appliquer(INCONNU, doc.doc, [['AddRecord', 'Participations', null, { Statut: 'sur' }]]), /403/);
+      await assert.rejects(lignes(INCONNU, doc.doc, 'Annuaire'), /403/);
+      assert.equal((await participations(PROPRIO, doc)).length, 0, 'aucune ligne laissée');
     });
   });
 
