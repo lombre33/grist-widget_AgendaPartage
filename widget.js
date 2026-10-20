@@ -9,8 +9,8 @@
    - Annuaire      : une ligne par personne (nom, prénom, e-mail, établissement)
    - Etablissement : le logo de chaque établissement
    - Presences     : une ligne par personne et par événement ; c’est la table à laquelle
-                     on lie le widget. Ses colonnes se choisissent dans le panneau
-                     de configuration du widget (voir COLONNES_PRESENCES).
+                     on lie le widget. Ses colonnes sont lues par leur nom (CONFIG.presences) :
+                     rien à associer dans le panneau du widget.
    ============================================================================ */
 
 /* ----------------------------------------------------------------------------
@@ -42,22 +42,21 @@ const CONFIG = {
     domaine: 'nom_de_domaine',
     logo: 'Logo',                        // colonne Pièces jointes, ou lien web (https://…)
   },
+  // Colonnes de la table Presences (celle à laquelle le widget est lié).
+  presences: {
+    evenement: 'Evenement',              // Référence → Evenements
+    utilisateur: 'Utilisateur',          // Référence → Annuaire
+    statut: 'Statut',
+    nom: 'Nom',                          // formule : $Utilisateur.nom
+    prenom: 'Prenom',                    // formule : $Utilisateur.prenom
+    logo: 'Logo',                        // formule : logo de l’établissement (voir README)
+  },
   // Valeurs écrites dans la colonne « Statut » de la table Presences
   // (les anciennes valeurs « sûr » et « probable » sont toujours reconnues à la lecture).
   statuts: { sur: 'présent', probable: 'à confirmer' },
   // Les événements changent rarement : on les relit à cet intervalle (les présences, elles, arrivent en direct).
   rafraichissementMs: 60000,
 };
-
-/* Colonnes de la table Presences, à associer dans le panneau de configuration du widget. */
-const COLONNES_PRESENCES = [
-  { name: 'evenement',   title: 'Événement',   type: 'Any',  description: 'Référence vers une ligne de la table Evenements' },
-  { name: 'utilisateur', title: 'Utilisateur', type: 'Any',  description: 'Référence vers une ligne de la table Annuaire' },
-  { name: 'statut',      title: 'Statut',      type: 'Any',  description: '« présent » ou « à confirmer »' },
-  { name: 'nom',         title: 'Nom',         type: 'Any',  description: 'Formule : $Utilisateur.nom' },
-  { name: 'prenom',      title: 'Prénom',      type: 'Any',  description: 'Formule : $Utilisateur.prenom' },
-  { name: 'logo',        title: 'Logo',        type: 'Any',  description: 'Formule : logo de l’établissement de l’utilisateur (voir README)', optional: true },
-];
 
 /* Libellés affichés (les codes internes restent « sur » et « probable »). */
 const LIBELLES = {
@@ -76,7 +75,7 @@ const etat = {
   presences: [],               // lues en direct dans la table Presences
   moi: null,                   // { id, nom, prenom, logo } : ma ligne dans la table ACL
   messageMoi: '',              // pourquoi moi est vide (mode lecture seule)
-  colonnesManquantes: false,   // colonnes du widget non associées
+  erreurColonnes: '',          // colonnes de Presences introuvables
   erreur: '',                  // problème de lecture de la table Evenements
   focus: null,                 // élément à refocaliser après un nouvel affichage
   choixEnCours: new Map(),     // evenementId -> { statut, ecrit } : mon choix pendant son enregistrement
@@ -235,29 +234,39 @@ async function chargerMoi() {
   rendre();
 }
 
-function recevoirPresences(enregistrements, associations) {
-  if (!associations) {
-    etat.colonnesManquantes = true;
-    rendre();
-    return;
-  }
-  etat.colonnesManquantes = false;
-  const lignes = grist.mapColumnNames(enregistrements) || [];
-  etat.presences = lignes
+function recevoirPresences(enregistrements) {
+  const c = CONFIG.presences;
+  etat.presences = enregistrements
     .map((r) => ({
       id: r.id,
-      evenement: Number(r.evenement) || 0,
-      utilisateur: Number(r.utilisateur) || 0,
-      statut: codeStatut(r.statut),
-      nom: texte(r.nom),
-      prenom: texte(r.prenom),
-      logo: r.logo,
+      evenement: Number(r[c.evenement]) || 0,
+      utilisateur: Number(r[c.utilisateur]) || 0,
+      statut: codeStatut(r[c.statut]),
+      nom: texte(r[c.nom]),
+      prenom: texte(r[c.prenom]),
+      logo: r[c.logo],
     }))
     .filter((p) => p.evenement && p.statut);
   // Mes choix sont maintenant confirmés par les données du serveur
   for (const [id, choix] of etat.choixEnCours) if (choix.ecrit) etat.choixEnCours.delete(id);
   preparerJeton(etat.presences.map((p) => p.logo)).then((nouveau) => nouveau && rendre());
   rendre();
+}
+
+/** Prévient (en haut de page) si la table liée au widget n’a pas les colonnes attendues. */
+async function verifierColonnes() {
+  try {
+    const id = await grist.selectedTable.getTableId();
+    const table = await grist.docApi.fetchTable(id);
+    const c = CONFIG.presences;
+    const manquantes = [c.evenement, c.utilisateur, c.statut, c.nom, c.prenom].filter((nom) => !(nom in table));
+    etat.erreurColonnes = manquantes.length
+      ? `Colonnes introuvables dans la table « ${id} » : ${manquantes.join(', ')}. Ajoutez-les ou corrigez CONFIG.presences dans widget.js.`
+      : '';
+    rendre();
+  } catch (err) {
+    console.warn('Vérification des colonnes impossible', err);   // facultative
+  }
 }
 
 /* ----------------------------------------------------------------------------
@@ -314,16 +323,17 @@ const typo = (v) => echapper(v).replace(/ ([:;!?»])/g, `${NBSP}$1`).replace(/«
 const nomComplet = (p) => `${p.prenom} ${p.nom}`.trim();
 
 async function ecrirePresence(evenementId, cible) {
+  const c = CONFIG.presences;
   const table = grist.getTable();
   const miennes = etat.presences.filter((p) => p.evenement === evenementId && p.utilisateur === etat.moi.id);
   const [gardee, ...doublons] = miennes;
   if (!cible) {
     if (miennes.length) await table.destroy(miennes.map((p) => p.id));
   } else if (gardee) {
-    await table.update({ id: gardee.id, fields: grist.mapColumnNamesBack({ statut: CONFIG.statuts[cible] }) });
+    await table.update({ id: gardee.id, fields: { [c.statut]: CONFIG.statuts[cible] } });
     if (doublons.length) await table.destroy(doublons.map((p) => p.id));
   } else {
-    await table.create({ fields: grist.mapColumnNamesBack({ evenement: evenementId, utilisateur: etat.moi.id, statut: CONFIG.statuts[cible] }) });
+    await table.create({ fields: { [c.evenement]: evenementId, [c.utilisateur]: etat.moi.id, [c.statut]: CONFIG.statuts[cible] } });
   }
 }
 
@@ -505,11 +515,8 @@ function rendrePlanning(jours) {
 }
 
 function rendre() {
-  if (etat.colonnesManquantes) {
-    afficherMessage('Associez les colonnes du widget (Événement, Utilisateur, Statut, Nom, Prénom, Logo) dans son panneau de configuration, à droite.');
-    return;
-  }
-  if (etat.erreur) afficherMessage(etat.erreur, true);
+  if (etat.erreurColonnes) afficherMessage(etat.erreurColonnes, true);
+  else if (etat.erreur) afficherMessage(etat.erreur, true);
   else if (!etat.moi && etat.messageMoi) afficherMessage(etat.messageMoi);
   else if (!etat.evenements.length) afficherMessage('Aucun événement à afficher.');
   else afficherMessage('');
@@ -570,10 +577,11 @@ document.addEventListener('error', (ev) => {
 if (typeof grist === 'undefined' || (window.self === window.top && !grist.simule)) {
   afficherMessage('Ce widget s’utilise dans Grist : ajoutez-le à une page via « Ajouter un widget > Personnalisé ».', true);
 } else {
-  grist.ready({ requiredAccess: 'full', columns: COLONNES_PRESENCES });
-  grist.onRecords(recevoirPresences);
+  grist.ready({ requiredAccess: 'full' });
+  grist.onRecords(recevoirPresences, { includeColumns: 'all' });
   chargerEvenements();
   chargerMoi();
+  verifierColonnes();
   setInterval(() => {
     chargerEvenements();
     if (!etat.moi) chargerMoi();

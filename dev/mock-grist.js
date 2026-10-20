@@ -7,6 +7,7 @@
                     ?restreint      l'Annuaire ne montre que sa propre ligne (au lieu de masquer les e-mails des autres)
                     ?ambigu         tous les e-mails de l'Annuaire sont lisibles : personne n'est reconnu
                     ?anonyme        aucun e-mail lisible : personne non reconnue
+                    ?colonne-manquante  la table Presences n'a pas de colonne « Statut »
                     ?vide           démarrer sans aucune présence */
 (function () {
   const params = new URLSearchParams(location.search);
@@ -41,13 +42,13 @@
   const parId = (id) => ANNUAIRE.find((p) => p.id === id);
   const logoDe = (p) => (ETABLISSEMENTS.find((e) => e.nom_de_domaine === p.nom_de_domaine) || {}).Logo || '';
 
-  // --- Table Presences : colonnes réelles volontairement différentes des noms du widget ------
-  const COLONNES_REELLES = { evenement: 'Evt', utilisateur: 'Personne', statut: 'Statut', nom: 'Nom', prenom: 'Prenom', logo: 'Logo' };
+  // --- Table Presences ----------------------------------------------------------------------
+  const COLONNES_PRESENCES = ['id', 'Evenement', 'Utilisateur', 'Statut', 'Nom', 'Prenom', 'Logo'];
   let prochainId = 1;
   let presences = [];
   const ligne = (evt, personneId, statut) => {
     const p = parId(personneId);
-    return { id: prochainId++, Evt: evt, Personne: personneId, Statut: statut, Nom: p.nom, Prenom: p.prenom, Logo: logoDe(p) };
+    return { id: prochainId++, Evenement: evt, Utilisateur: personneId, Statut: statut, Nom: p.nom, Prenom: p.prenom, Logo: logoDe(p) };
   };
   if (!params.has('vide')) {
     // [événement, personne, statut] — « sûr » et « probable » (ancienne version du widget) restent lus
@@ -70,39 +71,26 @@
   // --- API simulée ---------------------------------------------------------------------------
   const attendre = (ms = 150) => new Promise((r) => setTimeout(r, ms));
   let rappel = null;
-  let associations = null;
-  const notifier = () => setTimeout(() => rappel && rappel(presences.map((p) => ({ ...p })), associations), 120);
-  const enColonnes = (lignes) => {
-    const colonnes = Object.keys(lignes[0] || { id: 0 });
-    return Object.fromEntries(colonnes.map((c) => [c, lignes.map((l) => l[c])]));
-  };
+  const notifier = () => setTimeout(() => rappel && rappel(presences.map((p) => ({ ...p })), null), 120);
+  const enColonnes = (lignes, colonnes = Object.keys(lignes[0] || { id: 0 })) =>
+    Object.fromEntries(colonnes.map((c) => [c, lignes.map((l) => l[c])]));
 
   window.grist = {
     simule: true,
     ready(options) {
-      associations = {};
-      (options.columns || []).forEach((c) => { associations[c.name] = COLONNES_REELLES[c.name]; });
       console.info('[faux Grist] ready', options);
       notifier();
     },
-    onRecords(cb) { rappel = cb; },
-    mapColumnNames(enregistrements) {
-      if (!associations) return null;
-      const traduire = (r) => {
-        const sortie = { id: r.id };
-        for (const [logique, reel] of Object.entries(associations)) sortie[logique] = r[reel];
-        return sortie;
-      };
-      return Array.isArray(enregistrements) ? enregistrements.map(traduire) : traduire(enregistrements);
+    onRecords(cb, options) {
+      console.info('[faux Grist] onRecords', options);
+      rappel = cb;
     },
-    mapColumnNamesBack(champs) {
-      return Object.fromEntries(Object.entries(champs).map(([k, v]) => [associations[k] || k, v]));
-    },
+    selectedTable: { async getTableId() { return 'Presences'; } },
     getTable() {
       return {
         async create({ fields }) {
           await attendre();
-          const p = parId(fields.Personne);
+          const p = parId(fields.Utilisateur);
           presences.push({ id: prochainId++, Nom: p.nom, Prenom: p.prenom, Logo: logoDe(p), ...fields });
           notifier();
         },
@@ -124,6 +112,10 @@
         if (nom === 'Evenements') return enColonnes(window.MOCK_EVENEMENTS);
         if (nom === 'Annuaire') return enColonnes(annuaireVisible());
         if (nom === 'Etablissement') return enColonnes(ETABLISSEMENTS);
+        if (nom === 'Presences') {
+          const colonnes = params.has('colonne-manquante') ? COLONNES_PRESENCES.filter((c) => c !== 'Statut') : COLONNES_PRESENCES;
+          return enColonnes(presences, colonnes);
+        }
         throw new Error(`Table inconnue : ${nom}`);
       },
       async getAccessToken() { return { token: 'faux', baseUrl: 'https://exemple.invalid/api/docs/x', ttlMsecs: 600000 }; },
@@ -141,7 +133,7 @@
       const autres = ANNUAIRE.filter((p) => p.id !== moiId);
       const p = autres[Math.floor(Math.random() * autres.length)];
       const evt = 1 + Math.floor(Math.random() * window.MOCK_EVENEMENTS.length);
-      const existante = presences.find((l) => l.Evt === evt && l.Personne === p.id);
+      const existante = presences.find((l) => l.Evenement === evt && l.Utilisateur === p.id);
       if (existante) presences = presences.filter((l) => l !== existante);
       else presences.push(ligne(evt, p.id, Math.random() < 0.6 ? 'présent' : 'à confirmer'));
       document.getElementById('simuler-info').textContent = `${p.prenom} ${existante ? 'se retire de' : 'ajoute'} l’événement ${evt}`;

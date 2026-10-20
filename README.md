@@ -23,6 +23,8 @@ HTML, CSS et JavaScript natifs : la seule dépendance est le script officiel `gr
 
 ### Table `Presences` (à créer)
 
+Le widget lit ces colonnes par leur nom : rien à associer dans le panneau du widget. Si un nom doit changer, c’est `CONFIG.presences` dans `widget.js`.
+
 | Colonne | Type | Contenu |
 | --- | --- | --- |
 | `Evenement` | Référence → `Evenements` | rempli par le widget |
@@ -50,13 +52,14 @@ Ces trois colonnes en formule permettent à tout le monde de voir les noms et le
 1. Sur une page, *Ajouter un widget* → *Personnalisé*.
 2. Données : la table **`Presences`** (c’est elle qui arrive en direct dans le widget).
 3. URL du widget : celle de `index.html` hébergé (voir plus bas). Niveau d’accès : **Accès complet au document** (le widget lit aussi `Evenements`, `Annuaire` et `Etablissement`).
-4. Dans le panneau du widget, associer les six colonnes proposées : Événement, Utilisateur, Statut, Nom, Prénom, Logo.
+
+Aucune colonne à associer. Si la table liée n’a pas les colonnes attendues, un message en haut de page les liste.
 
 ## Hébergement
 GitHub Pages : *Settings* → *Pages* → *Deploy from a branch* → `main`, dossier `/ (root)`. L’URL du widget est alors `https://<compte>.github.io/<dépôt>/`.
 
 ## Changer un nom de table ou de colonne, ou un libellé
-- Noms de tables et de colonnes : bloc `CONFIG` en haut de `widget.js`. Les colonnes de `Presences` se règlent directement dans le panneau du widget, sans toucher au code.
+- Noms de tables et de colonnes (dont celles de `Presences`) : bloc `CONFIG` en haut de `widget.js`.
 - Valeurs écrites dans `Statut` : `CONFIG.statuts` (les anciennes valeurs « sûr » et « probable » sont toujours reconnues à la lecture).
 - Textes des boutons et des compteurs : `LIBELLES`, juste en dessous de `COLONNES_PRESENCES`.
 
@@ -64,7 +67,7 @@ GitHub Pages : *Settings* → *Pages* → *Deploy from a branch* → `main`, dos
 ```sh
 python3 -m http.server 8000
 ```
-puis ouvrir <http://localhost:8000/dev/>. Le faux Grist reprend la structure des tables ci-dessus et simule des participants (bouton « Un autre participant bouge » pour voir la mise à jour en direct). Options d’URL : `?moi=2` (autre personne), `?restreint` (l’Annuaire ne montre que sa ligne), `?ambigu` (tous les e-mails lisibles), `?anonyme` (personne non reconnue), `?vide` (aucune présence).
+puis ouvrir <http://localhost:8000/dev/>. Le faux Grist reprend la structure des tables ci-dessus et simule des participants (bouton « Un autre participant bouge » pour voir la mise à jour en direct). Options d’URL : `?moi=2` (autre personne), `?restreint` (l’Annuaire ne montre que sa ligne), `?ambigu` (tous les e-mails lisibles), `?anonyme` (personne non reconnue), `?colonne-manquante` (colonne `Statut` absente de `Presences`), `?vide` (aucune présence).
 
 ## Mettre à jour les événements
 Modifier la liste `EVENEMENTS` dans `data/build_xlsx.py` puis `python3 data/build_xlsx.py` (nécessite `openpyxl`), ou modifier directement la table `Evenements` dans Grist : le widget relit les événements chaque minute.
