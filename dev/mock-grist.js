@@ -10,6 +10,7 @@
                     ?anonyme        personne non connectée à Grist (e-mail de connexion vide, aucun e-mail lisible)
                     ?inconnu        connecté avec une adresse absente de l'Annuaire
                     ?sans-declencheur  la formule « à la création » (user.Email) ne donne rien : le widget se rabat sur l'e-mail lisible
+                    ?declencheur-casse  les colonnes de Participations existent déjà mais ont été créées avec recalcWhen 1 (jamais calculées) : le widget doit les recréer
                     ?sans-ajout     les règles d'accès interdisent d'ajouter une ligne dans Participations
                     ?sans-colonnes  l'Annuaire n'a pas encore les colonnes de présence : le widget doit les créer
                     ?sans-droits    ... mais la structure du document n'est pas modifiable par cette personne
@@ -72,6 +73,11 @@
   const emailConnecte = params.has('anonyme') ? '' : params.has('inconnu') ? 'quelquun@exemple.org' : parId(moiId).email;
   const colonnesParticipations = ['A', 'B', 'C'];
   const infosColonnes = {};
+  if (params.has('declencheur-casse')) {   // état du vrai document après la première version : recalcWhen 1 = jamais calculée à la création
+    colonnesParticipations.push('Email', 'Utilisateur');
+    infosColonnes.Email = { recalcWhen: 1 };
+    infosColonnes.Utilisateur = {};
+  }
   let participations = [];
   let prochaineParticipation = 1;
   // Formule « Utilisateur » : la personne de l'Annuaire qui a l'e-mail de connexion
@@ -118,14 +124,19 @@
         const retValues = [];
         for (const [type, table, ...args] of actions) {
           retValues.push(null);
-          if (type === 'AddColumn' && params.has('sans-droits')) throw new Error('Blocked by table structure access rules');
+          if ((type === 'AddColumn' || type === 'RemoveColumn') && params.has('sans-droits')) throw new Error('Blocked by table structure access rules');
           if (table === 'Participations') {
             if (type === 'AddColumn') {
               colonnesParticipations.push(args[0]);
               infosColonnes[args[0]] = args[1];
+            } else if (type === 'RemoveColumn') {
+              colonnesParticipations.splice(colonnesParticipations.indexOf(args[0]), 1);
+              delete infosColonnes[args[0]];
             } else if (type === 'AddRecord') {
               if (params.has('sans-ajout')) throw new Error('Blocked by table create access rules');
-              const email = params.has('sans-declencheur') ? '' : emailConnecte;
+              // comme Grist : une colonne « recalcWhen 1 » n'est pas calculée à la création de la ligne
+              const declenche = !params.has('sans-declencheur') && colonnesParticipations.includes('Email') && (infosColonnes.Email || {}).recalcWhen !== 1;
+              const email = declenche ? emailConnecte : '';
               const ligne = { id: prochaineParticipation++, Email: email, Utilisateur: personneDe(email) };
               participations.push(ligne);
               retValues[retValues.length - 1] = ligne.id;

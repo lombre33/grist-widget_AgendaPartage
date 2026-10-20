@@ -86,6 +86,7 @@ const etat = {
   annuaire: [],                // une entrée par personne : { id, nom, prenom, domaine, etablissement, email, presents, aConfirmer }
   presences: [],               // une entrée par personne et par événement, déduite de l’annuaire
   connexion: null,             // { email, personne } : e-mail de connexion et ligne de l’Annuaire correspondante, null si indisponible
+  detailConnexion: '',         // pourquoi la reconnaissance par la connexion n’a pas abouti (affiché en cas de problème)
   moi: null,                   // { id, nom, prenom, logo } : ma ligne dans l’Annuaire
   messageMoi: '',              // pourquoi moi est vide (mode lecture seule)
   erreurColonnes: '',          // colonnes de présence absentes de l’Annuaire et impossibles à créer
@@ -250,34 +251,61 @@ const FORMULE_PERSONNE = [
 ].join('\n');
 
 /**
+ * Les deux colonnes de la table de connexion. `recalcWhen: 0` + une formule = « formule à la création » :
+ * la colonne est calculée à la création de la ligne (la valeur 1 la désactiverait).
+ * Avec `reparer`, les colonnes existantes sont recréées (version précédente du widget, qui les créait mal).
+ */
+async function installerColonnesConnexion(existante, reparer) {
+  const { table, email, personne } = CONFIG.connexion;
+  const actions = [];
+  if (reparer) for (const nom of [personne, email]) if (nom in existante) actions.push(['RemoveColumn', table, nom]);
+  if (reparer || !(email in existante)) {
+    actions.push(['AddColumn', table, email, { type: 'Text', isFormula: false, formula: 'user.Email', recalcWhen: 0, label: 'E-mail de connexion' }]);
+  }
+  if (reparer || !(personne in existante)) {
+    actions.push(['AddColumn', table, personne, { type: `Ref:${CONFIG.tables.annuaire}`, isFormula: true, formula: FORMULE_PERSONNE, label: 'Personne' }]);
+  }
+  if (actions.length) await grist.docApi.applyUserActions(actions);
+}
+
+/** Ajoute une ligne dans la table de connexion, lit ce que les formules y ont écrit, puis la supprime. */
+async function lireConnexion() {
+  const { table, email, personne } = CONFIG.connexion;
+  let id = null;
+  try {
+    id = (await grist.docApi.applyUserActions([['AddRecord', table, null, {}]])).retValues[0];
+    const lues = await grist.docApi.fetchTable(table);
+    const i = lues.id.indexOf(id);
+    if (i < 0) throw new Error('ligne de connexion introuvable');
+    return { email: texte(lues[email][i]), personne: Number(lues[personne][i]) || 0 };
+  } finally {
+    if (id != null) await grist.docApi.applyUserActions([['RemoveRecord', table, id]]).catch((err) => console.warn('Ligne de connexion non supprimée', err));
+  }
+}
+
+/**
  * Qui suis-je ? Grist n’indique pas l’utilisateur au widget, mais il le donne aux formules évaluées
  * à la création d’une ligne (`user.Email`). Le widget ajoute donc une ligne dans la table à laquelle il est lié :
  * la colonne « Email » reçoit l’e-mail de connexion, la colonne « Utilisateur » la personne correspondante de
  * l’Annuaire. Il lit ce résultat puis supprime la ligne : aucune règle d’accès particulière n’est nécessaire.
  */
 async function identifierParConnexion() {
-  const { table, email, personne } = CONFIG.connexion;
-  let id = null;
+  const { table, email } = CONFIG.connexion;
   try {
     const existante = await grist.docApi.fetchTable(table);
-    const actions = [];
-    if (!(email in existante)) {
-      actions.push(['AddColumn', table, email, { type: 'Text', isFormula: false, formula: 'user.Email', recalcWhen: 1, label: 'E-mail de connexion' }]);   // recalcWhen 1 : à la création de la ligne seulement
+    await installerColonnesConnexion(existante, false);
+    let connexion = await lireConnexion();
+    if (!connexion.email && email in existante) {
+      // Colonnes déjà là mais e-mail vide : elles ont sans doute été créées sans déclenchement. On les recrée une fois.
+      await installerColonnesConnexion(existante, true);
+      connexion = await lireConnexion();
     }
-    if (!(personne in existante)) {
-      actions.push(['AddColumn', table, personne, { type: `Ref:${CONFIG.tables.annuaire}`, isFormula: true, formula: FORMULE_PERSONNE, label: 'Personne' }]);
-    }
-    if (actions.length) await grist.docApi.applyUserActions(actions);
-    id = (await grist.docApi.applyUserActions([['AddRecord', table, null, {}]])).retValues[0];
-    const lues = await grist.docApi.fetchTable(table);
-    const i = lues.id.indexOf(id);
-    if (i < 0) throw new Error('Ligne de connexion introuvable');
-    etat.connexion = { email: texte(lues[email][i]), personne: Number(lues[personne][i]) || 0 };
+    etat.connexion = connexion;
+    etat.detailConnexion = connexion.email ? '' : 'adresse de connexion vide';
   } catch (err) {
     console.warn(`Reconnaissance par la table « ${table} » impossible`, err);
     etat.connexion = null;
-  } finally {
-    if (id != null) await grist.docApi.applyUserActions([['RemoveRecord', table, id]]).catch((err) => console.warn('Ligne de connexion non supprimée', err));
+    etat.detailConnexion = `erreur : ${texte(err && err.message).slice(0, 120) || 'inconnue'}`;
   }
 }
 
@@ -298,7 +326,7 @@ function identifierMoi() {
   if (miennes.length === 1) return definir(miennes[0], trouverLogo(miennes[0]));
   etat.moi = null;
   etat.messageMoi = miennes.length
-    ? `Impossible de vous reconnaître : le widget doit pouvoir ajouter une ligne temporaire dans la table « ${CONFIG.connexion.table} ». Ouvrez-le une fois avec un compte propriétaire, et vérifiez que les éditeurs peuvent modifier cette table.`
+    ? `Impossible de vous reconnaître (${etat.detailConnexion || 'e-mail de connexion indisponible'}). Ouvrez le widget une fois avec un compte propriétaire et vérifiez que les éditeurs peuvent modifier la table « ${CONFIG.connexion.table} ».`
     : 'Vous n’êtes pas reconnu(e) : connectez-vous avec votre compte pour indiquer votre présence.';
   return undefined;
 }
