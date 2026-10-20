@@ -34,11 +34,17 @@ async function connecter(contexte, utilisateur) {
   await contexte.addCookies([{ name: 'grist_core', value: decodeURIComponent((await session(utilisateur)).split('=').slice(1).join('=')), url: GRIST }]);
 }
 
-/** Contexte de navigateur connecté à Grist comme cette personne ; le script grist-plugin-api.js est pris sur le Grist local (pas d'accès à Internet nécessaire). */
-async function contexteNavigateur(navigateur, utilisateur, options = {}) {
+/**
+ * Contexte de navigateur connecté à Grist comme cette personne ; le script grist-plugin-api.js est pris sur le Grist local
+ * (pas d'accès à Internet nécessaire). Par défaut il est servi en « build eval » (tout le script passé à eval) : le script de
+ * docs.getgrist.com est de ce type, et une politique de sécurité sans 'unsafe-eval' l'empêcherait de s'exécuter
+ * (le widget affichait alors « s'utilise dans Grist »). Avec { apiEval: false } on sert le script tel quel.
+ */
+async function contexteNavigateur(navigateur, utilisateur, { apiEval = true, scriptApi, ...options } = {}) {
   const contexte = await navigateur.newContext({ viewport: { width: 1300, height: 900 }, ...options });
   await connecter(contexte, utilisateur);
-  const script = await (await fetch(`${GRIST}/grist-plugin-api.js`)).text();
+  const brut = scriptApi || await (await fetch(`${GRIST}/grist-plugin-api.js`)).text();
+  const script = apiEval && !scriptApi ? `eval(${JSON.stringify(brut)});` : brut;   // { scriptApi } : texte à servir tel quel (par exemple le vrai script)
   await contexte.route('https://docs.getgrist.com/grist-plugin-api.js', (r) => r.fulfill({ contentType: 'text/javascript', body: script }));
   return contexte;
 }
@@ -55,4 +61,14 @@ async function lignes(utilisateur, doc, table) {
 /** Donne un rôle (« editors », « viewers », « owners ») à une adresse e-mail sur le document. */
 const partager = (doc, email, role) => api(PROPRIETAIRE, 'PATCH', `/docs/${doc}/access`, { delta: { users: { [email]: role } } });
 
-module.exports = { GRIST, WIDGET, PROPRIETAIRE, session, api, connecter, contexteNavigateur, appliquer, lignes, partager };
+/** Le vrai script servi par docs.getgrist.com, ou null si ce site n'est pas joignable (par exemple derrière un pare-feu). */
+let vraiScript;
+async function scriptApiReel() {
+  if (vraiScript === undefined) {
+    vraiScript = await fetch('https://docs.getgrist.com/grist-plugin-api.js', { signal: AbortSignal.timeout(8000) })
+      .then((r) => (r.ok ? r.text() : null), () => null);
+  }
+  return vraiScript;
+}
+
+module.exports = { scriptApiReel, GRIST, WIDGET, PROPRIETAIRE, session, api, connecter, contexteNavigateur, appliquer, lignes, partager };

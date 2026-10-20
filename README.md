@@ -100,7 +100,7 @@ GitHub Pages : *Settings* → *Pages* → *Deploy from a branch* → `main`, dos
 
 ## Sécurité
 - Le widget a besoin de l’accès complet au document : le code publié ici s’exécute avec les droits de chaque personne qui ouvre la page, propriétaires compris. Protégez le compte GitHub (double authentification) et ne renommez ni le compte ni le dépôt sans mettre à jour l’adresse dans Grist.
-- `index.html` déclare une politique de sécurité (CSP, balise `<meta>`) : seuls ses propres fichiers et le script `https://docs.getgrist.com/grist-plugin-api.js` sont chargés, aucun appel réseau, pas de script ni de style en ligne, images en `https:`. Si vous ajoutez une ressource externe (police, image, script), ou si vous chargez `grist-plugin-api.js` depuis votre propre Grist, adaptez cette balise. Le script de Grist tente d’ajouter une feuille de style en ligne pour son thème : la politique la refuse, sans effet sur le widget (un message dans la console du navigateur).
+- Pas de politique de sécurité de contenu (CSP) dans `index.html` : une CSP essayée le 20/10/2026 sans `'unsafe-eval'` empêchait le script `https://docs.getgrist.com/grist-plugin-api.js` (fourni en « build eval ») de s’exécuter, et le widget affichait « s’utilise dans Grist ». Si une CSP revient, `script-src` doit autoriser `'unsafe-eval'` ; les tests (`grist-reel.test.js`) servent le script de Grist en build eval pour le vérifier.
 - Les règles d’accès (section ci-dessus) sont ce qui empêche de modifier les présences des autres : le widget ne les remplace pas.
 
 ## Changer un nom de table ou de colonne, ou un libellé

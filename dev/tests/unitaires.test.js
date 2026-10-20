@@ -308,16 +308,15 @@ describe('configuration', () => {
     for (const code of ['sur', 'probable']) assert.equal(await f('codeStatut', (await f('CONFIG.statuts'))[code]), code, 'chaque statut écrit est relu');
   });
 
-  test('index.html déclare une politique de sécurité (CSP) stricte : pas d\'eval, pas de script en ligne, aucun appel réseau', () => {
+  test('index.html : pas de CSP qui empêcherait le script de Grist de s\'exécuter (build eval), pas de script, gestionnaire ni style en ligne', () => {
     const html = require('node:fs').readFileSync(require('node:path').join(__dirname, '../../index.html'), 'utf8');
+    // Le 20/10/2026, une CSP sans 'unsafe-eval' a empêché le script de docs.getgrist.com de s'exécuter : le widget
+    // affichait « s'utilise dans Grist » chez Antoine. Une CSP ne peut revenir qu'avec 'unsafe-eval' (ou un script sans eval).
     const csp = /<meta http-equiv="Content-Security-Policy" content="([^"]+)"/.exec(html);
-    assert.ok(csp, 'balise CSP absente');
-    const directives = Object.fromEntries(csp[1].split(';').map((d) => d.trim().split(/\s+/)).map(([nom, ...valeurs]) => [nom, valeurs]));
-    assert.deepEqual(directives['default-src'], ["'none'"]);
-    assert.deepEqual(directives['script-src'], ["'self'", 'https://docs.getgrist.com']);
-    assert.deepEqual(directives['connect-src'], ["'none'"]);
-    assert.ok(!/unsafe-(eval|inline)/.test(csp[1]), 'ni unsafe-eval ni unsafe-inline');
-    assert.ok(html.indexOf('Content-Security-Policy') < html.indexOf('<script'), 'la CSP précède tous les scripts');
+    if (csp) {
+      const script = csp[1].split(';').map((d) => d.trim()).find((d) => d.startsWith('script-src ')) || csp[1];
+      assert.match(script, /'unsafe-eval'/, 'la CSP bloque eval : le script de Grist ne s\'exécute plus');
+    }
     assert.ok(!/<script(?![^>]*\bsrc=)/.test(html) && !/\son[a-z]+=/.test(html) && !/\sstyle=/.test(html), 'index.html ne contient ni script, ni gestionnaire, ni style en ligne');
   });
 

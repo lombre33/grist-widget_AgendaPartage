@@ -6,7 +6,7 @@ const { spawnSync } = require('node:child_process');
 const { describe, test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { serveur, lancerNavigateur, attendre, pause, SEL } = require('./helpers');
-const { GRIST, PROPRIETAIRE, api, appliquer, lignes, partager, contexteNavigateur } = require('../grist/lib');
+const { GRIST, PROPRIETAIRE, scriptApiReel, api, appliquer, lignes, partager, contexteNavigateur } = require('../grist/lib');
 const { creerDocument, installerReglesAntoine, installerReglesRecommandees, ajouterLogos, supprimerDocument } = require('../grist/document');
 
 const PROPRIO = PROPRIETAIRE;
@@ -38,20 +38,18 @@ describe('vrai Grist', { skip: disponible ? false : `Grist ne répond pas sur ${
   }
 
   /** Ouvre la page du widget comme cette personne ; renvoie la page Grist et le cadre du widget. */
-  async function ouvrir(utilisateur, doc, { largeur = 1300, hauteur = 900 } = {}) {
-    const contexte = await contexteNavigateur(navigateur, utilisateur, { viewport: { width: largeur, height: hauteur } });
+  async function ouvrir(utilisateur, doc, { largeur = 1300, hauteur = 900, suffixe = '', apiEval, scriptApi } = {}) {
+    const contexte = await contexteNavigateur(navigateur, utilisateur, { viewport: { width: largeur, height: hauteur }, ...(apiEval === undefined ? {} : { apiEval }), ...(scriptApi ? { scriptApi } : {}) });
     const page = await contexte.newPage();
     page.erreurs = [];
     page.on('pageerror', (e) => page.erreurs.push(e.message));
-    page.violationsCsp = [];    // refus de la politique de sécurité (CSP) de index.html
-    page.on('console', (m) => { if (/Content Security Policy/.test(m.text())) page.violationsCsp.push(m.text()); });
     page.navigations = 0;       // chargements de la page Grist
     page.chargementsWidget = 0; // chargements du cadre du widget (Grist le recharge quand il recharge le document)
     page.on('framenavigated', (f) => {
       if (f === page.mainFrame()) page.navigations += 1;
       else if (f.url().startsWith(srv.url)) page.chargementsWidget += 1;
     });
-    await page.goto(`${GRIST}/${doc.doc}/x/p/${doc.page}`);
+    await page.goto(`${GRIST}/${doc.doc}/x/p/${doc.page}${suffixe}`);
     const widget = await attendre(() => page.frames().find((f) => f.url().startsWith(srv.url)), { message: 'le widget ne s\'est pas chargé' });
     await widget.waitForSelector(SEL.evenement, { timeout: 30000 }).catch(async () => {
       throw new Error(`aucun événement affiché : ${(await widget.locator('body').innerText()).slice(0, 300)}`);
@@ -248,6 +246,37 @@ describe('vrai Grist', { skip: disponible ? false : `Grist ne répond pas sur ${
       assert.deepEqual(restantes.map((l) => l.Email).sort(), [JEANNE, KARIM].sort());
       assert.equal(restantes.filter((l) => l.Evenement).length, 1);
     });
+  });
+
+  describe('chargement de la page (adresse du document et script de l\'API de Grist)', () => {
+    test('la page ouverte avec ?style=singlePage (document intégré dans une autre page) affiche le planning et enregistre un choix', async () => {
+      const doc = await nouveau();
+      const { widget } = await ouvrir(JEANNE, doc, { suffixe: '?style=singlePage' });
+      assert.equal(await widget.locator(SEL.nom).innerText(), 'Jeanne Delmas');
+      assert.equal(await widget.locator(SEL.evenement).count(), 30);
+      assert.doesNotMatch(await widget.locator('body').innerText(), /s’utilise dans Grist/);
+      await carte(widget, 'Atelier Durable').locator(SEL.present).click();
+      await attendre(async () => (await miennes(JEANNE, doc, JEANNE)).length === 1);
+    });
+
+    test('avec le vrai script https://docs.getgrist.com/grist-plugin-api.js et ?style=singlePage (ignoré si ce site n\'est pas joignable)', async (t) => {
+      const scriptApi = await scriptApiReel();
+      if (!scriptApi) { t.skip('docs.getgrist.com injoignable depuis cette machine'); return; }
+      const doc = await nouveau();
+      const { widget } = await ouvrir(JEANNE, doc, { suffixe: '?style=singlePage', scriptApi });
+      assert.equal(await widget.locator(SEL.nom).innerText(), 'Jeanne Delmas');
+      assert.equal(await widget.locator(SEL.evenement).count(), 30);
+    });
+
+    for (const apiEval of [true, false]) {
+      test(`le widget démarre avec le script de l'API de Grist ${apiEval ? 'en « build eval » (tel que le sert docs.getgrist.com)' : 'servi tel quel'}`, async () => {
+        const doc = await nouveau();
+        const { widget } = await ouvrir(JEANNE, doc, { apiEval });
+        assert.equal(await widget.locator(SEL.nom).innerText(), 'Jeanne Delmas');
+        assert.equal(await widget.locator(SEL.evenement).count(), 30);
+        assert.equal(await widget.evaluate(() => typeof grist), 'object');
+      });
+    }
   });
 
   describe('plusieurs personnes en même temps', () => {
@@ -469,25 +498,6 @@ describe('vrai Grist', { skip: disponible ? false : `Grist ne répond pas sur ${
       await pause(1500);
       assert.equal((await colonnes(doc)).Email.recalcWhen, 1, 'la colonne n\'a pas été recréée');
       assert.deepEqual(sansEcho(await participations(PROPRIO, doc)), avant, 'l\'e-mail de la présence est toujours là');
-    });
-
-    test('la politique de sécurité (CSP) est active et le widget fonctionne avec : logo en pièce jointe, choix enregistré', async () => {
-      const doc = await nouveau({ logos: true });
-      const { page, widget } = await ouvrir(JEANNE, doc);
-      assert.equal(await widget.evaluate(() => Boolean(document.querySelector('meta[http-equiv="Content-Security-Policy"]'))), true);
-      await attendre(async () => widget.locator(`${SEL.moi} img.avatar`).evaluate((i) => i.complete && i.naturalWidth > 0), { message: 'logo non chargé' });
-      const c = carte(widget, 'Atelier Durable');
-      await c.locator(SEL.present).click();
-      await attendre(async () => (await participations(PROPRIO, doc)).some((l) => l.Statut === 'présent'), { message: 'présence non enregistrée' });
-      // seule la feuille de style que le script de Grist ajoute pour son thème est refusée : sans effet sur le widget
-      assert.deepEqual(page.violationsCsp.filter((m) => !/inline style/.test(m)), []);
-      // et la politique refuse bien ce qu'elle doit refuser : appel réseau, script en ligne, script externe
-      assert.equal(await widget.evaluate(() => fetch('https://example.org/').then(() => 'ouvert', () => 'bloqué')), 'bloqué');
-      await widget.evaluate(() => { const s = document.createElement('script'); s.textContent = 'window.__enLigne = 1'; document.body.append(s); });
-      await attendre(() => page.violationsCsp.some((m) => /inline script/.test(m)), { message: 'script en ligne non refusé' });
-      assert.equal(await widget.evaluate(() => window.__enLigne), undefined);
-      await widget.evaluate(() => { const s = document.createElement('script'); s.src = 'https://exemple.invalid/x.js'; document.body.append(s); });
-      await attendre(() => page.violationsCsp.some((m) => /exemple\.invalid/.test(m)), { message: 'script externe non refusé' });
     });
   });
 });
