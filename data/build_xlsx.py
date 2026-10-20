@@ -307,8 +307,25 @@ def ecrire_donnees_dev(chemin):
         f.write("window.MOCK_EVENEMENTS = " + json.dumps(lignes, ensure_ascii=False, indent=1) + ";\n")
 
 
+def ecrire_cibles_planning(chemin):
+    """Les publics de chaque séance, lus par le widget pour remplir la colonne « Cibles » quand elle n'existe pas encore
+    (ni vue du widget : il la crée alors, en propriétaire du document). Séance repérée par son jour, son début et son titre."""
+    lignes = []
+    for jour, debut, _fin, titre, *_ in lignes_triees():
+        publics = [c for c in cibles_de(jour, debut, titre).split(", ") if c]
+        if publics:
+            lignes.append([jour.isoformat(), debut, titre, publics])
+    with open(chemin, "w", encoding="utf-8") as f:
+        f.write("// Généré par data/build_xlsx.py — ne pas modifier à la main.\n")
+        f.write("// Publics de chaque séance d'après les plannings PDF : [jour, début, titre, [publics]].\n")
+        f.write("window.CIBLES_PLANNING = [\n")
+        f.write(",\n".join(" " + json.dumps(l, ensure_ascii=False) for l in lignes))
+        f.write("\n];\n")
+
+
 if __name__ == "__main__":
     verifier_cibles()
     sortie = sys.argv[1] if len(sys.argv) > 1 else "data/Evenements_Semaine_Innovation_2026.xlsx"
     print(f"{construire(sortie)} séances écrites dans {sortie}")
     ecrire_donnees_dev("dev/evenements.js")
+    ecrire_cibles_planning("cibles-planning.js")

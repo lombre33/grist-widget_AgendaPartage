@@ -26,7 +26,9 @@
                     ?utilisateur-vide  la ligne d'une présence est écrite sans « Utilisateur » (la formule « à la création » ne donne rien)
                     ?doublons       deux lignes à mon nom pour l'événement 3 (« à confirmer » et « présent »)
                     ?orphelines     deux lignes de connexion restées dans Participations (la sienne et celle d'une autre personne)
-                    ?sans-cibles    la table Evenements n'a pas la colonne Cibles (le filtre « Pour qui ? » n'apparaît pas)
+                    ?sans-cibles    la table Evenements n'a pas la colonne Cibles : le widget la crée et la remplit (sauf avec ?sans-droits)
+                    ?cibles-vides   la colonne Cibles existe mais ne contient aucune valeur (le widget n'y touche pas)
+                    ?evenements-lecture-seule les règles d'accès refusent toute modification des lignes de Evenements
                     ?sans-personnels  la colonne Cibles ne contient que les quatre publics des plannings (aucune séance « Personnels »)
                     ?vide           démarrer sans aucune présence
                     ?foule          60 personnes de plus inscrites à l'événement 3 (liste longue, groupée par établissement)
@@ -132,6 +134,11 @@
     Object.fromEntries(cols.map((c) => [c, lignes.map((l) => l[c])]));
   window.MOCK_ACTIONS = [];
   window.MOCK_COLONNES = infosColonnes;   // définitions des colonnes créées dans Participations
+  // La table Evenements (modifiable : le widget peut y créer et remplir la colonne « Cibles », comme dans Grist, en un seul lot)
+  const tableEvenements = enColonnes(window.MOCK_EVENEMENTS);
+  if (params.has('sans-cibles')) delete tableEvenements.Cibles;
+  if (params.has('cibles-vides')) tableEvenements.Cibles = tableEvenements.id.map(() => null);
+  window.MOCK_TABLE_EVENEMENTS = tableEvenements;
   let rappel = null;
   // Dans onRecords (contrairement à fetchTable), Grist rend une référence sous la forme { tableId, rowId }
   const reference = (tableId, rowId) => (rowId ? { tableId, rowId } : 0);
@@ -153,9 +160,8 @@
       async fetchTable(nom) {
         await attendre(40);
         if (nom === 'Evenements') {
-          const t = enColonnes(window.MOCK_EVENEMENTS);
-          if (params.has('sans-cibles')) delete t.Cibles;
-          if (params.has('sans-personnels')) t.Cibles = t.Cibles.map((v) => { const l = (v || []).slice(1).filter((x) => x !== 'Personnels'); return l.length ? ['L', ...l] : null; });
+          const t = JSON.parse(JSON.stringify(tableEvenements));
+          if (params.has('sans-personnels') && t.Cibles) t.Cibles = t.Cibles.map((v) => { const l = (v || []).slice(1).filter((x) => x !== 'Personnels'); return l.length ? ['L', ...l] : null; });
           return t;
         }
         if (nom === 'Annuaire' && fermeAuxInconnus()) throw new Error('Blocked by table read access rules');
@@ -202,6 +208,24 @@
               retValues[retValues.length - 1] = ligne.id;
             } else if (type === 'RemoveRecord') {
               demandes = demandes.filter((l) => l.id !== args[0]);
+            }
+            continue;
+          }
+          if (table === 'Evenements') {
+            if (type === 'AddColumn') {
+              if (params.has('sans-droits')) throw new Error('Blocked by table structure access rules');
+              if (args[0] in tableEvenements) throw new Error(`La colonne ${args[0]} existe déjà`);
+              tableEvenements[args[0]] = tableEvenements.id.map(() => null);
+              retValues[retValues.length - 1] = { colId: args[0] };
+            } else if (type === 'BulkUpdateRecord') {
+              const [ids, champs] = args;
+              if (params.has('evenements-lecture-seule')) throw new Error('Blocked by table update access rules');
+              for (const [col, valeurs] of Object.entries(champs)) {
+                if (!(col in tableEvenements)) throw new Error(`Colonne inconnue : ${col}`);
+                ids.forEach((id, i) => { tableEvenements[col][tableEvenements.id.indexOf(id)] = valeurs[i]; });
+              }
+            } else {
+              throw new Error(`Action inconnue : ${type}`);
             }
             continue;
           }

@@ -147,6 +147,51 @@ describe('événements', () => {
     assert.deepEqual((await f('normaliserEvenement', { ...ligne, Cibles: ['L', 'Étudiants', 'Recherche'] })).cibles, ['recherche', 'etudiants']);
   });
 
+  describe('ciblesDesSeances : remplir la colonne Cibles d\'après les plannings', () => {
+    const plannings = [
+      ['2026-11-23', '09:30', 'Atelier « Durable »', ['Pédagogie', 'Étudiants']],
+      ['2026-11-23', '14:00', 'Table ronde', ['Recherche']],
+      ['2026-11-24', '09:00', 'CampusIA', ['Pédagogie']],
+      ['2026-11-24', '11:30', 'CampusIA', ['Pédagogie', 'Recherche']],
+    ];
+    const seance = (id, jour, h, m, titre) => ({ id, jour, debut: h == null ? null : { h, m }, titre });
+    const trouver = async (evenements) => Object.fromEntries(await page.evaluate(([e, p]) => [...ciblesDesSeances(e, p)], [evenements, plannings]));
+
+    test('jour, début et titre identiques : les publics des plannings', async () => {
+      assert.deepEqual(await trouver([seance(1, '2026-11-23', 9, 30, 'Atelier « Durable »'), seance(2, '2026-11-23', 14, 0, 'Table ronde')]),
+        { 1: ['Pédagogie', 'Étudiants'], 2: ['Recherche'] });
+    });
+
+    test('guillemets, apostrophes, espaces insécables, accents et majuscules du titre ne comptent pas', async () => {
+      assert.deepEqual(await trouver([seance(1, '2026-11-23', 9, 30, `  atelier${NBSP}"durable"  `)]), { 1: ['Pédagogie', 'Étudiants'] });
+      assert.deepEqual(await trouver([seance(1, '2026-11-23', 9, 30, 'ATELIER  DURABLE')]), { 1: ['Pédagogie', 'Étudiants'] });
+    });
+
+    test('heure modifiée ou absente : reconnu au jour et au titre seulement si ce titre est unique ce jour-là', async () => {
+      assert.deepEqual(await trouver([seance(1, '2026-11-23', 10, 0, 'Table ronde')]), { 1: ['Recherche'] });
+      assert.deepEqual(await trouver([seance(1, '2026-11-23', null, 0, 'Table ronde')]), { 1: ['Recherche'] });
+      // deux « CampusIA » le même jour : sans la bonne heure, on ne devine pas
+      assert.deepEqual(await trouver([seance(1, '2026-11-24', 10, 0, 'CampusIA'), seance(2, '2026-11-24', 15, 0, 'CampusIA')]), {});
+      assert.deepEqual(await trouver([seance(1, '2026-11-24', 9, 0, 'CampusIA'), seance(2, '2026-11-24', 11, 30, 'CampusIA')]), { 1: ['Pédagogie'], 2: ['Pédagogie', 'Recherche'] });
+    });
+
+    test('séance inconnue, autre jour ou plannings vides : aucun public', async () => {
+      assert.deepEqual(await trouver([seance(1, '2026-11-25', 9, 30, 'Atelier « Durable »'), seance(2, '2026-11-23', 9, 30, 'Autre chose')]), {});
+      assert.deepEqual(await page.evaluate(() => [...ciblesDesSeances([{ id: 1, jour: '2026-11-23', debut: null, titre: 'X' }], [])]), []);
+      assert.deepEqual(await page.evaluate(() => [...ciblesDesSeances([], window.CIBLES_PLANNING)]), []);
+    });
+
+    test('les plannings livrés (cibles-planning.js) donnent exactement la colonne Cibles de l\'Excel pour les 30 séances de dev/evenements.js', async () => {
+      const [trouvees, attendues, total] = await page.evaluate(() => {
+        const evenements = window.MOCK_EVENEMENTS.map(normaliserEvenement);
+        const t = ciblesDesSeances(evenements);
+        return [evenements.map((e) => t.get(e.id) || []), window.MOCK_EVENEMENTS.map((e) => (e.Cibles || ['L']).slice(1)), window.CIBLES_PLANNING.length];
+      });
+      assert.deepEqual(trouvees, attendues);
+      assert.equal(total, 30);
+    });
+  });
+
   test('lienCarte : adresse, sinon lieu et ville, sinon rien ; caractères encodés', async () => {
     assert.equal(await f('lienCarte', { adresse: '1 rue Éric, 33400 Talence', lieu: 'BU', ville: 'Talence' }), 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent('1 rue Éric, 33400 Talence'));
     assert.equal(await f('lienCarte', { adresse: '', lieu: 'Locaux du CATIE', ville: 'Talence' }), 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent('Locaux du CATIE, Talence'));

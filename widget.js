@@ -66,6 +66,10 @@ const CONFIG = {
   },
   // Fenêtre « Connectez-vous pour participer » : le service de connexion et le service que les gens connaissent déjà.
   connexion: { service: 'ProConnect', reference: 'Resana' },
+  // Colonne « Cibles » de Evenements (publics visés, filtre « Pour qui ? ») : si elle n’existe pas, le widget la crée et la remplit
+  // d’après les plannings PDF (cibles-planning.js) quand une personne qui peut modifier la structure du document l’ouvre.
+  // Une colonne qui existe déjà n’est jamais modifiée. Mettre false pour ne jamais la créer.
+  creerColonneCibles: true,
   // Les événements, l’Annuaire et les logos changent rarement : on les relit à cet intervalle
   // (les présences, elles, arrivent en direct).
   rafraichissementMs: 60000,
@@ -89,7 +93,7 @@ const CIBLES = [
 ];
 
 /* Numéro de version, affiché en bas de page : il permet de vérifier quelle version Grist a chargée (cache du navigateur). */
-const VERSION = '2026-10-20 · n';
+const VERSION = '2026-10-20 · o';
 
 const JOURS_SEMAINE = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
 const MOIS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
@@ -112,6 +116,7 @@ const etat = {
   messageMoi: '',              // pourquoi moi est vide (mode lecture seule)
   erreurColonnes: '',          // colonnes de Participations absentes et impossibles à créer
   erreur: '',                  // problème de lecture de la table Evenements
+  colonneCibles: true,         // la table Evenements a une colonne « Cibles » (sinon le widget essaie de la créer)
   pret: false,                 // vrai dès que le premier chargement est terminé
   focus: null,                 // élément à refocaliser après un nouvel affichage
   choixEnCours: new Map(),     // evenementId -> { statut, ecrit, quand } : mon choix jusqu’à sa confirmation par Participations
@@ -260,7 +265,9 @@ function normaliserEvenement(r) {
 
 async function chargerEvenements() {
   try {
-    const lignes = lignesDeTable(await grist.docApi.fetchTable(CONFIG.tables.evenements));
+    const table = await grist.docApi.fetchTable(CONFIG.tables.evenements);
+    etat.colonneCibles = CONFIG.evenements.cibles in table;
+    const lignes = lignesDeTable(table);
     etat.evenements = lignes
       .map(normaliserEvenement)
       .filter((e) => e.jour && e.titre)
@@ -276,6 +283,57 @@ async function chargerEvenements() {
     etat.erreur = `Impossible de lire la table « ${CONFIG.tables.evenements} ». Vérifiez son nom (CONFIG.tables.evenements) et les droits d’accès.`;
   }
   rendre();
+}
+
+/** Titre réduit à ses lettres et chiffres, sans accents ni casse : les guillemets, apostrophes et espaces ne comptent pas. */
+const cleTitre = (titre) => sansAccent(titre).replace(/[^a-z0-9]+/g, '');
+
+/**
+ * Les publics (libellés) de chaque séance de la table, d'après les plannings PDF (`plannings` : [jour, début, titre, [publics]]).
+ * Une séance se reconnaît à son jour, son début et son titre ; si l'heure a changé, au jour et au titre seuls, mais seulement
+ * quand ce titre est unique ce jour-là dans les deux listes. Renvoie une Map numéro de ligne -> publics ; une séance inconnue n'y est pas.
+ */
+function ciblesDesSeances(evenements, plannings = window.CIBLES_PLANNING || []) {
+  const heure = (t) => (t ? `${String(t.h).padStart(2, '0')}:${String(t.m).padStart(2, '0')}` : '');
+  const exacts = new Map(plannings.map(([jour, debut, titre, publics]) => [`${jour}|${debut}|${cleTitre(titre)}`, publics]));
+  const parTitre = new Map();
+  for (const [jour, , titre, publics] of plannings) {
+    const cle = `${jour}|${cleTitre(titre)}`;
+    parTitre.set(cle, parTitre.has(cle) ? null : publics);   // null : deux séances du même titre ce jour-là
+  }
+  const nbTitres = new Map();
+  for (const e of evenements) nbTitres.set(`${e.jour}|${cleTitre(e.titre)}`, (nbTitres.get(`${e.jour}|${cleTitre(e.titre)}`) || 0) + 1);
+  const trouvees = new Map();
+  for (const e of evenements) {
+    const cle = `${e.jour}|${cleTitre(e.titre)}`;
+    const publics = exacts.get(`${e.jour}|${heure(e.debut)}|${cleTitre(e.titre)}`) || (nbTitres.get(cle) === 1 ? parTitre.get(cle) : null);
+    if (publics && publics.length) trouvees.set(e.id, publics);
+  }
+  return trouvees;
+}
+
+/**
+ * Colonne « Cibles » absente de Evenements : le widget la crée (liste de choix) et la remplit d'après les plannings, en une seule
+ * opération (tout ou rien). Cela demande de pouvoir modifier la structure du document : pour les autres personnes, la tentative échoue
+ * sans bruit et la rangée « Pour qui ? » reste cachée. Une colonne qui existe déjà, remplie ou non, n'est jamais touchée.
+ */
+async function preparerCibles() {
+  if (!CONFIG.creerColonneCibles || etat.colonneCibles || etat.erreur) return;
+  const table = CONFIG.tables.evenements;
+  const colonne = CONFIG.evenements.cibles;
+  const publics = ciblesDesSeances(etat.evenements);
+  if (!publics.size) return;
+  const ids = [...publics.keys()];
+  try {
+    await grist.docApi.applyUserActions([
+      ['AddColumn', table, colonne, { type: 'ChoiceList', isFormula: false, widgetOptions: JSON.stringify({ choices: CIBLES.map((c) => c.libelle) }), label: 'Cibles' }],
+      ['BulkUpdateRecord', table, ids, { [colonne]: ids.map((id) => ['L', ...publics.get(id)]) }],
+    ]);
+    alerter(`Configuration terminée : colonne « ${colonne} » ajoutée à la table « ${table} » (${nombre(ids.length, ['séance rangée', 'séances rangées'])} par public).`);
+    await chargerEvenements();
+  } catch (err) {
+    console.warn('Création de la colonne Cibles impossible', err);
+  }
 }
 
 /** Logos des établissements, indexés par nom de domaine puis par nom (une seule normalisation par ligne). */
@@ -1326,6 +1384,7 @@ if (typeof grist === 'undefined' || (window.self === window.top && !grist.simule
   grist.onRecords(recevoirPresences, { includeColumns: 'all' });
   (async () => {
     await Promise.all([chargerEvenements(), chargerEtablissements(), preparerParticipations(), preparerDemandes()]);
+    await preparerCibles();
     await chargerAnnuaire();
     await verifierAcces();
     etat.pret = true;

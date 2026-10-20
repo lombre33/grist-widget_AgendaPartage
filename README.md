@@ -17,7 +17,7 @@ HTML, CSS et JavaScript natifs : la seule dépendance est le script officiel `gr
 ## Mise en place
 
 1. **Ajouter le widget** : sur une page, *Ajouter un widget* → *Personnalisé*, URL de `index.html` hébergé (voir plus bas), niveau d’accès **Accès complet au document**. Données : la table **`Participations`**. Rien n’est à associer dans le panneau du widget.
-2. **L’ouvrir une fois avec un compte propriétaire** : le widget crée lui-même les colonnes de `Participations` (un message « Configuration terminée » s’affiche). Rien à créer à la main, pas de formule à écrire.
+2. **L’ouvrir une fois avec un compte propriétaire** : le widget crée lui-même les colonnes de `Participations` et, si elle manque, la colonne `Cibles` de `Evenements` (un message « Configuration terminée » s’affiche). Rien à créer à la main, pas de formule à écrire.
 3. C’est tout, si les règles d’accès autorisent ce qui est listé dans « Règles d’accès » plus bas (c’est le cas tant qu’aucune règle ne restreint `Participations`).
 
 ## Tables Grist
@@ -103,10 +103,11 @@ La table `Demandes_Annuaire` (colonnes `Nom`, `Prenom`, `Email_saisi`, `Etabliss
 
 ## Publics visés (filtre « Pour qui ? »)
 
-La colonne facultative `Cibles` de `Evenements` (type **Liste de choix**, choix : `Pédagogie`, `Recherche`, `Étudiants`, `Entreprises`, `Personnels`) range chaque événement dans les publics des quatre plannings imprimés, plus `Personnels` pour la seule séance qu’aucun planning ne vise (le serious game « No wrong door », public du site : personnels administratifs) ; un événement peut avoir plusieurs publics. Une colonne Texte avec des valeurs séparées par des virgules (`Pédagogie, Recherche`) est lue aussi. Les valeurs sont dans `data/build_xlsx.py` (table `CIBLES`, d’après les plannings PDF) et dans l’Excel.
+La colonne facultative `Cibles` de `Evenements` (type **Liste de choix**, choix : `Pédagogie`, `Recherche`, `Étudiants`, `Entreprises`, `Personnels`) range chaque événement dans les publics des quatre plannings imprimés, plus `Personnels` pour la seule séance qu’aucun planning ne vise (le serious game « No wrong door », public du site : personnels administratifs) ; un événement peut avoir plusieurs publics. Une colonne Texte avec des valeurs séparées par des virgules (`Pédagogie, Recherche`) est lue aussi. Les valeurs sont dans `data/build_xlsx.py` (table `CIBLES`, d’après les plannings PDF), dans l’Excel et dans `cibles-planning.js` (relancer `python3 data/build_xlsx.py` après toute modification).
 
 - Une rangée de bulles « Pour qui ? » au-dessus des jours, rien sur les fiches. On coche un ou plusieurs publics : un événement reste affiché s’il concerne l’un d’eux ; aucune bulle cochée, tout le planning. Un jour sans événement pour ce public affiche « Aucun événement pour ce public ce jour-là ».
 - Sans colonne `Cibles` (ou si elle est vide), la rangée n’apparaît pas : le widget reste comme avant. Une bulle n’apparaît que si au moins une séance porte ce public : tant que `Personnels` n’est saisi nulle part, la rangée garde ses quatre bulles, exactement comme avant. Un événement sans aucun public n’apparaît que quand aucune bulle n’est cochée.
+- **Création automatique de la colonne.** Si `Evenements` n’a pas de colonne `Cibles`, le widget la crée (liste de choix) et la remplit d’après les plannings PDF (`cibles-planning.js`, généré par `data/build_xlsx.py`), à l’ouverture par une personne qui peut modifier la structure **et** les lignes de `Evenements` (avec les règles d’accès d’Antoine : les propriétaires). C’est un seul lot « tout ou rien » : sans ce droit, rien n’est créé à moitié et la rangée reste cachée. Les séances sont reconnues par leur jour, leur début et leur titre (guillemets, accents et majuscules ignorés ; si l’heure a changé, par le titre seul quand il est unique ce jour-là). **Une colonne `Cibles` qui existe déjà n’est jamais modifiée**, remplie ou non, y compris quand quelqu’un efface une valeur à la main. Pour ne jamais la recréer (par exemple si vous supprimez la colonne exprès), mettre `creerColonneCibles: false` dans `CONFIG`.
 - Le choix est gardé sur l’appareil (`localStorage`, clé `semaine-innovation-2026:cibles`).
 - Noms des bulles et infobulle (qui est concerné) : `CIBLES` dans `widget.js` ; style : `.bulle` dans `style.css`.
 

@@ -83,7 +83,7 @@ async function creerDocument(nom = 'Semaine de l’innovation (test)', { widget 
   return { doc, page: section.fields.parentId, emails: PERSONNES.map(emailDe), tableRef };
 }
 
-module.exports = { creerDocument, PERSONNES, emailDe };
+module.exports = { creerDocument, PERSONNES, emailDe, evenements };
 
 /**
  * Les règles d'accès du document d'Antoine : attribut utilisateur « acl » (user.Email → Annuaire.email),

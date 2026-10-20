@@ -7,7 +7,7 @@ const { describe, test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { serveur, lancerNavigateur, attendre, pause, SEL } = require('./helpers');
 const { GRIST, PROPRIETAIRE, scriptApiReel, api, appliquer, lignes, partager, contexteNavigateur } = require('../grist/lib');
-const { creerDocument, installerReglesAntoine, installerReglesRecommandees, installerReglesPartagePublic, ajouterLogos, supprimerDocument } = require('../grist/document');
+const { creerDocument, installerReglesAntoine, installerReglesRecommandees, installerReglesPartagePublic, ajouterLogos, supprimerDocument, evenements } = require('../grist/document');
 
 const PROPRIO = PROPRIETAIRE;
 const JEANNE = 'jeanne.delmas@u-bordeaux.fr';
@@ -157,11 +157,54 @@ describe('vrai Grist', { skip: disponible ? false : `Grist ne répond pas sur ${
       assert.deepEqual(page.erreurs, []);
     });
 
-    test('sans colonne Cibles : pas de rangée de bulles, planning inchangé', async () => {
-      const doc = await nouveau({ cibles: false });
+    const cibles = async (doc) => (await lignes(PROPRIO, doc.doc, 'Evenements')).map((e) => [e.Titre, e.Cibles || null]);
+    const colonneCibles = async (doc) => (await api(PROPRIO, 'GET', `/docs/${doc.doc}/tables/Evenements/columns`)).columns.find((c) => c.id === 'Cibles');
+    const attendues = () => evenements().map((e) => [e.Titre, e.Cibles || null]);   // les valeurs de dev/evenements.js, comme l'Excel livré
+
+    test('sans colonne Cibles, le propriétaire qui ouvre le widget la voit créée (liste de choix) et remplie d\'après les plannings ; les autres personnes la voient', async () => {
+      const doc = await nouveau({ cibles: false });   // la première ouverture du propriétaire (dans nouveau) a créé la colonne
+      const colonne = await colonneCibles(doc);
+      assert.equal(colonne.fields.type, 'ChoiceList');
+      assert.deepEqual(JSON.parse(colonne.fields.widgetOptions).choices, ['Pédagogie', 'Recherche', 'Étudiants', 'Entreprises', 'Personnels']);
+      assert.deepEqual(await cibles(doc), attendues());
       const { page, widget } = await ouvrir(PROPRIO, doc);
-      assert.equal(await widget.locator('#cibles').isVisible(), false);
-      assert.equal(await widget.locator(SEL.evenement).count(), 30);
+      assert.deepEqual(await widget.locator('.bulle').allInnerTexts(), ['Pédagogie', 'Recherche', 'Étudiants', 'Entreprises', 'Personnels']);
+      await widget.locator('[data-cible="entreprises"]').evaluate((b) => b.click());
+      assert.equal(await widget.locator(SEL.evenement).count(), 13);
+      assert.deepEqual(page.erreurs, []);
+      const j = await ouvrir(JEANNE, doc);
+      assert.deepEqual(await j.widget.locator('.bulle').allInnerTexts(), ['Pédagogie', 'Recherche', 'Étudiants', 'Entreprises', 'Personnels']);
+      assert.deepEqual(await cibles(doc), attendues(), 'rouvrir ne change rien');
+    });
+
+    test('sans colonne Cibles et avec les règles d\'Antoine (Evenements modifiable par les seuls propriétaires), une éditrice n\'en crée pas : rien à moitié créé, pas de rangée de bulles, planning inchangé, aucune erreur', async () => {
+      const doc = await nouveau({ cibles: false, regles: true });
+      await appliquer(PROPRIO, doc.doc, [['RemoveColumn', 'Evenements', 'Cibles']]);
+      const j = await ouvrir(JEANNE, doc);
+      await pause(1500);
+      assert.equal(await j.widget.locator('#cibles').isVisible(), false);
+      assert.equal(await j.widget.locator(SEL.evenement).count(), 30);
+      assert.equal(await colonneCibles(doc), undefined, 'la colonne n\'a pas été créée, même à moitié');
+      assert.deepEqual(j.page.erreurs, []);
+      // puis le propriétaire ouvre : la colonne est créée et remplie
+      const p = await ouvrir(PROPRIO, doc);
+      await attendre(() => p.widget.locator('#cibles').isVisible(), { message: 'la rangée « Pour qui ? » n\'est pas apparue chez le propriétaire' });
+      assert.deepEqual(await cibles(doc), attendues());
+    });
+
+    test('colonne Cibles déjà là : jamais modifiée, même quand une valeur a été changée ou effacée à la main', async () => {
+      const doc = await nouveau();
+      assert.deepEqual(await cibles(doc), attendues());
+      const [premier, second] = await lignes(PROPRIO, doc.doc, 'Evenements');
+      await appliquer(PROPRIO, doc.doc, [['BulkUpdateRecord', 'Evenements', [premier.id, second.id], { Cibles: [['L', 'Personnels'], null] }]]);
+      const avant = await cibles(doc);
+      assert.deepEqual(avant[0], [premier.Titre, ['L', 'Personnels']]);
+      assert.equal(avant[1][1], null);
+      const { page, widget } = await ouvrir(PROPRIO, doc);
+      await pause(1500);
+      assert.deepEqual(await cibles(doc), avant);
+      await widget.locator('[data-cible="personnels"]').evaluate((b) => b.click());
+      assert.equal(await widget.locator(SEL.evenement).count(), 2, 'le serious game et la séance rangée à la main');
       assert.deepEqual(page.erreurs, []);
     });
   });

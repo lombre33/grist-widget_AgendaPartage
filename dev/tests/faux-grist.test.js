@@ -238,11 +238,55 @@ describe('publics visés (Pour qui ?)', () => {
     assert.equal(await page.locator(SEL.evenement).count(), 30);
   });
 
-  test('sans colonne Cibles, la rangée n\'apparaît pas et le planning est inchangé', async () => {
-    const page = await ouvrir({ requete: '?sans-cibles' });
+  test('sans colonne Cibles et sans droit de modifier la structure : la rangée n\'apparaît pas, le planning est inchangé, une seule tentative', async () => {
+    const page = await ouvrir({ requete: '?sans-cibles&sans-droits' });
+    assert.equal(await page.locator('#cibles').isVisible(), false);
+    assert.equal(await page.locator(SEL.evenement).count(), 30);
+    assert.equal((await actions(page)).filter((lot) => lot.some((a) => a[1] === 'Evenements')).length, 1);
+    assert.equal(await page.evaluate(() => 'Cibles' in window.MOCK_TABLE_EVENEMENTS), false, 'rien n\'a été créé');
+    assert.equal(await page.locator(SEL.toast).isVisible(), false, 'pas de message pour les personnes qui ne peuvent rien y faire');
+    aucuneErreur(page);
+  });
+
+  test('sans colonne Cibles et lignes en lecture seule : tout est refusé en bloc, la colonne n\'est pas créée à moitié', async () => {
+    const page = await ouvrir({ requete: '?sans-cibles&evenements-lecture-seule' });
     assert.equal(await page.locator('#cibles').isVisible(), false);
     assert.equal(await page.locator(SEL.evenement).count(), 30);
     aucuneErreur(page);
+  });
+
+  test('sans colonne Cibles, la personne qui peut modifier la structure la voit créée et remplie d\'après les plannings, en un seul lot', async () => {
+    const page = await ouvrir({ requete: '?sans-cibles' });
+    await attendre(() => page.locator('#cibles').isVisible(), { message: 'la rangée « Pour qui ? » n\'est pas apparue' });
+    assert.deepEqual(await page.locator('.bulle').allInnerTexts(), ['Pédagogie', 'Recherche', 'Étudiants', 'Entreprises', 'Personnels']);
+    const lots = (await actions(page)).filter((lot) => lot.some((a) => a[1] === 'Evenements'));
+    assert.equal(lots.length, 1);
+    assert.deepEqual(lots[0].map((a) => a[0]), ['AddColumn', 'BulkUpdateRecord']);
+    assert.equal(lots[0][0][2], 'Cibles');
+    assert.equal(lots[0][0][3].type, 'ChoiceList');
+    assert.deepEqual(JSON.parse(lots[0][0][3].widgetOptions).choices, ['Pédagogie', 'Recherche', 'Étudiants', 'Entreprises', 'Personnels']);
+    assert.equal(lots[0][1][2].length, 30);
+    assert.match(await page.locator(SEL.toast).innerText(), /Configuration terminée.*« Cibles ».*30 séances rangées par public/);
+    // les mêmes valeurs que la colonne livrée avec l'Excel (dev/evenements.js)
+    const [ecrit, attendu] = await page.evaluate(() => [window.MOCK_TABLE_EVENEMENTS.Cibles, window.MOCK_EVENEMENTS.map((e) => e.Cibles)]);
+    assert.deepEqual(ecrit, attendu);
+    for (const [code, nombre] of [['pedagogie', 13], ['recherche', 16], ['etudiants', 7], ['entreprises', 13], ['personnels', 1]]) {
+      await bulle(page, code).click();
+      assert.equal(await page.locator(SEL.evenement).count(), nombre, code);
+      await bulle(page, code).click();
+    }
+    assert.equal(await page.locator(SEL.evenement).count(), 30);
+    aucuneErreur(page);
+  });
+
+  test('colonne Cibles déjà là : le widget ne touche à rien dans Evenements, même quand elle est vide ou modifiée à la main', async () => {
+    for (const requete of ['', '?sans-personnels', '?cibles-vides']) {
+      const page = await ouvrir({ requete });
+      await pause(600);
+      assert.equal((await actions(page)).filter((lot) => lot.some((a) => a[1] === 'Evenements')).length, 0, requete);
+      assert.equal(await page.locator('#cibles').isVisible(), requete !== '?cibles-vides', `${requete} : la rangée n'apparaît que si la colonne contient des valeurs`);
+      aucuneErreur(page);
+    }
   });
 
   test('petit mobile : les bulles tiennent sans défilement horizontal de la page', async () => {
