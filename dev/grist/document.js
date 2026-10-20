@@ -1,7 +1,9 @@
 /* Crée, dans un vrai Grist local, un document de test construit comme celui d'Antoine :
    Annuaire, Etablissement, Evenements et une table Participations vide (colonnes A, B, C par défaut)
    sur laquelle est posé le widget (accès complet). Le widget crée lui-même les autres colonnes. */
-const { api, appliquer, WIDGET, PROPRIETAIRE } = require('./lib');
+const fs = require('node:fs');
+const path = require('node:path');
+const { api, appliquer, session, GRIST, WIDGET, PROPRIETAIRE } = require('./lib');
 
 const ETABLISSEMENTS = [
   ['Université de Bordeaux', 'UB', 'u-bordeaux.fr'],
@@ -27,12 +29,15 @@ const colonnes = (noms, type = 'Text') => noms.map((id) => ({ id, type, isFormul
 const lots = (colonne, valeurs) => valeurs.map((v) => v[colonne]);
 
 /** Les événements du faux Grist (dev/evenements.js), tels qu'ils sont dans la table Evenements. */
+let evenementsLus;
 function evenements() {
-  global.window = {};
-  require('../evenements.js');
-  const liste = global.window.MOCK_EVENEMENTS;
-  delete global.window;
-  return liste;
+  if (!evenementsLus) {
+    global.window = {};
+    require('../evenements.js');
+    evenementsLus = global.window.MOCK_EVENEMENTS;
+    delete global.window;
+  }
+  return evenementsLus;
 }
 
 async function creerDocument(nom = 'Semaine de l’innovation (test)', { widget = WIDGET, acces = 'full' } = {}) {
@@ -69,3 +74,48 @@ async function creerDocument(nom = 'Semaine de l’innovation (test)', { widget 
 }
 
 module.exports = { creerDocument, PERSONNES, emailDe };
+
+/**
+ * Les règles d'accès du document d'Antoine : attribut utilisateur « acl » (user.Email → Annuaire.email),
+ * Annuaire modifiable par sa propre ligne et par les propriétaires, Etablissement et Evenements réservés
+ * aux propriétaires, lecture pour tous. Aucune règle sur Participations.
+ */
+async function installerReglesAntoine(doc) {
+  const ressources = await appliquer(PROPRIETAIRE, doc, [
+    ['AddRecord', '_grist_ACLResources', null, { tableId: '*', colIds: '*' }],
+    ['AddRecord', '_grist_ACLResources', null, { tableId: 'Annuaire', colIds: '*' }],
+    ['AddRecord', '_grist_ACLResources', null, { tableId: 'Etablissement', colIds: '*' }],
+    ['AddRecord', '_grist_ACLResources', null, { tableId: 'Evenements', colIds: '*' }],
+  ]);
+  const [defaut, annuaire, etablissement, evenements] = ressources;
+  const regle = (resource, aclFormula, permissionsText) => ({ resource, aclFormula, permissionsText, memo: '' });
+  const rules = [
+    { resource: defaut, userAttributes: JSON.stringify({ name: 'acl', tableId: 'Annuaire', lookupColId: 'email', charId: 'Email' }), aclFormula: '', permissionsText: '', memo: '' },
+    regle(annuaire, 'rec.email == user.Email', '+R+U-C-D'),
+    regle(annuaire, 'user.Access in [OWNER]', '+R+U+C+D'),
+    regle(annuaire, '', '+R-U-C-D'),
+    regle(etablissement, 'user.Access in [OWNER]', '+R+U+C+D'),
+    regle(etablissement, '', '+R-U-C-D'),
+    regle(evenements, 'user.Access in [OWNER]', '+R+U+C+D'),
+    regle(evenements, '', '+R-U-C-D'),
+  ].map((r, i) => ({ ...r, rulePos: i + 1 }));
+  await appliquer(PROPRIETAIRE, doc, rules.map((r) => ['AddRecord', '_grist_ACLRules', null, r]));
+}
+
+module.exports.installerReglesAntoine = installerReglesAntoine;
+
+/** Donne un logo (pièce jointe Grist) aux deux premiers établissements : le logo de la Semaine de l'innovation. */
+async function ajouterLogos(doc) {
+  const image = fs.readFileSync(path.join(__dirname, '../../assets/logo-semaine-innovation.jpg'));
+  const form = new FormData();
+  form.append('upload', new Blob([image], { type: 'image/jpeg' }), 'logo.jpg');
+  const reponse = await fetch(`${GRIST}/api/docs/${doc}/attachments`, { method: 'POST', headers: { Cookie: await session(PROPRIETAIRE), 'X-Requested-With': 'XMLHttpRequest' }, body: form });
+  if (!reponse.ok) throw new Error(`envoi du logo impossible : ${reponse.status} ${await reponse.text()}`);
+  const [piece] = await reponse.json();
+  await appliquer(PROPRIETAIRE, doc, [1, 2].map((id) => ['UpdateRecord', 'Etablissement', id, { Logo: ['L', piece] }]));
+}
+
+const supprimerDocument = (doc) => api(PROPRIETAIRE, 'DELETE', `/docs/${doc}`).catch(() => {});
+
+module.exports.ajouterLogos = ajouterLogos;
+module.exports.supprimerDocument = supprimerDocument;

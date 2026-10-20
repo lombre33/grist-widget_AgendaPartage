@@ -11,7 +11,8 @@ HTML, CSS et JavaScript natifs : la seule dépendance est le script officiel `gr
 | `assets/fonts/` | la police Bitter (graisses 400 et 700, licence OFL jointe), servie avec le widget : aucun appel à un service extérieur |
 | `data/Evenements_Semaine_Innovation_2026.xlsx` | les 30 séances, à importer dans Grist |
 | `data/build_xlsx.py` | génère l’Excel (et les données de test) à partir de la liste des événements |
-| `dev/` | faux Grist pour tester dans un navigateur, sans Grist |
+| `dev/` | faux Grist pour tester dans un navigateur, scripts d’un vrai Grist local et batterie de tests (voir « Tests ») |
+| `package.json` | ne sert qu’aux tests (le widget n’a aucune dépendance) |
 
 ## Mise en place
 
@@ -56,7 +57,7 @@ Le widget a seulement besoin que :
 - tout le monde puisse **lire** `Annuaire`, `Etablissement`, `Evenements` et `Participations` ;
 - chaque éditeur puisse **ajouter et supprimer des lignes** dans `Participations` (c’est le cas tant qu’aucune règle ne l’interdit).
 
-Recommandé, pour qu’on ne puisse pas modifier ou supprimer les présences des autres : sur `Participations`, modification et suppression autorisées seulement si `rec.Email == user.Email` (les propriétaires : `user.Access in [OWNER]` en premier).
+Recommandé, pour qu’on ne puisse pas modifier ou supprimer les présences des autres : sur `Participations`, modification et suppression autorisées seulement si `rec.Email == user.Email` (les propriétaires : `user.Access in [OWNER]` en premier). Sans cette règle, personne ne peut cocher à la place d’un autre *depuis le widget*, mais un éditeur qui appelle l’API de Grist à la main pourrait écrire une autre adresse dans `Email` ou modifier la ligne de quelqu’un.
 
 ## Affichage
 
@@ -73,11 +74,30 @@ GitHub Pages : *Settings* → *Pages* → *Deploy from a branch* → `main`, dos
 - Noms de tables et de colonnes (dont les deux colonnes de présence) : bloc `CONFIG` en haut de `widget.js`.
 - Textes des boutons et des compteurs : `LIBELLES`, juste en dessous de `CONFIG`.
 
-## Tester sans Grist
+## Tests
+
+La batterie (`npm test`, soit `node --test dev/tests/*.test.js`) a trois étages. Elle demande Node 22 et [Playwright](https://playwright.dev) (`npm install` dans le dépôt, ou `npm install --no-save playwright`) ; `CHROMIUM_PATH` indique un Chromium déjà installé. Le widget lui-même n’a aucune dépendance.
+
+| Étage | Fichier | Ce qu’il vérifie |
+| --- | --- | --- |
+| Unitaire | `dev/tests/unitaires.test.js` | les fonctions de `widget.js` (lecture des valeurs Grist, dates et heures, références `{ tableId, rowId }`, logos, établissements, participants, regroupements, liens de carte) |
+| Faux Grist | `dev/tests/faux-grist.test.js` | l’écran dans un navigateur : jours, filtre, boutons de choix, compteurs, liste des participants, messages d’erreur, toutes les options `?…` ci-dessous |
+| Vrai Grist | `dev/tests/grist-reel.test.js` | le widget dans l’image officielle de Grist, avec plusieurs personnes connectées en même temps : première ouverture, enregistrement, doublons et lignes oubliées, mise à jour en direct, règles d’accès d’Antoine (attribut utilisateur `acl`) sans rechargement de la page, lecteur, personne absente de l’Annuaire, logos en pièces jointes, lien de carte |
+
+L’étage « vrai Grist » est ignoré tant que Grist ne répond pas. Pour le lancer (Docker requis, image `gristlabs/grist`) :
+
+```sh
+sh dev/grist/serveur.sh   # Grist sur http://127.0.0.1:8484, connexion par simple adresse e-mail
+npm run test:grist
+```
+
+Chaque test crée son propre document (les 30 événements, 7 personnes, 5 établissements, tables `Annuaire`, `Etablissement`, `Evenements`, `Participations` comme dans le document d’Antoine) et le supprime à la fin. Variables : `GRIST_URL` (par défaut `http://127.0.0.1:8484`). Le script `dev/grist/lib.js` regroupe l’accès à l’API REST de Grist et `dev/grist/document.js` la fabrication du document de test.
+
+## Tester à la main sans Grist
 ```sh
 python3 -m http.server 8000
 ```
-puis ouvrir <http://localhost:8000/dev/>. Le faux Grist reprend la structure des tables ci-dessus et simule des participants (bouton « Un autre participant bouge » pour voir la mise à jour en direct). Options d’URL : `?moi=2` (autre personne), `?restreint` (l’Annuaire ne montre que sa ligne), `?ambigu` (tous les e-mails lisibles, comme dans le vrai document), `?anonyme` (personne non connectée), `?inconnu` (connecté avec une adresse absente de l’Annuaire), `?sans-declencheur` (`user.Email` ne donne rien : repli sur l’e-mail lisible), `?declencheur-casse` (colonnes d’une version précédente, à recréer), `?sans-ajout` (impossible d’ajouter une ligne dans `Participations`), `?sans-colonnes` (les colonnes n’existent pas encore : le widget les crée), `?sans-droits` (… mais la structure n’est pas modifiable), `?ecriture-refusee` (les règles d’accès refusent d’enregistrer une présence), `?vide` (aucune présence), `?foule` (60 personnes de plus inscrites à un événement : liste longue, groupée par établissement).
+puis ouvrir <http://localhost:8000/dev/>. Le faux Grist reprend la structure des tables ci-dessus et simule des participants (bouton « Un autre participant bouge » pour voir la mise à jour en direct). Options d’URL : `?moi=2` (autre personne), `?restreint` (l’Annuaire ne montre que sa ligne), `?ambigu` (tous les e-mails lisibles, comme dans le vrai document), `?anonyme` (personne non connectée), `?inconnu` (connecté avec une adresse absente de l’Annuaire), `?sans-declencheur` (`user.Email` ne donne rien : repli sur l’e-mail lisible), `?declencheur-casse` (colonnes d’une version précédente, à recréer), `?sans-ajout` (impossible d’ajouter une ligne dans `Participations`), `?sans-colonnes` (les colonnes n’existent pas encore : le widget les crée), `?sans-droits` (… mais la structure n’est pas modifiable), `?ecriture-refusee` (les règles d’accès refusent d’enregistrer une présence), `?vide` (aucune présence), `?foule` (60 personnes de plus inscrites à un événement : liste longue, groupée par établissement), `?orphelines` (lignes de connexion oubliées dans `Participations`), `?doublons` (deux lignes pour le même événement et la même personne).
 
 ## Mettre à jour les événements
 Modifier la liste `EVENEMENTS` dans `data/build_xlsx.py` puis `python3 data/build_xlsx.py` (nécessite `openpyxl`), ou modifier directement la table `Evenements` dans Grist : le widget relit les événements chaque minute.

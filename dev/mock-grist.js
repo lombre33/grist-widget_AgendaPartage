@@ -18,6 +18,8 @@
                     ?ecriture-refusee  les règles d'accès refusent d'enregistrer, modifier ou supprimer une présence
                     ?ecriture-perdue   Grist accepte l'écriture d'une présence mais la ligne n'existe pas ensuite
                     ?utilisateur-vide  la ligne d'une présence est écrite sans « Utilisateur » (la formule « à la création » ne donne rien)
+                    ?doublons       deux lignes à mon nom pour l'événement 3 (« à confirmer » et « présent »)
+                    ?orphelines     deux lignes de connexion restées dans Participations (la sienne et celle d'une autre personne)
                     ?vide           démarrer sans aucune présence
                     ?foule          60 personnes de plus inscrites à l'événement 3 (liste longue, groupée par établissement)
 
@@ -88,6 +90,14 @@
     demo.forEach(([e, p, st]) => ajouterPresence(p, e, st));
     if (params.has('foule')) ANNUAIRE.filter((p) => p.id >= 9).forEach((p) => ajouterPresence(p.id, 3, p.id % 5 ? 'présent' : 'à confirmer'));
   }
+
+  // Lignes de connexion restées là (page fermée avant leur suppression) : sans événement ni statut
+  if (tout && params.has('orphelines')) for (const autre of [moiId, moiId === 2 ? 3 : 2]) {
+    participations.push({ id: prochaineParticipation++, Email: parId(autre).email, Utilisateur: autre, Evenement: 0, Statut: '' });
+  }
+
+  // Doublons : deux lignes à mon nom pour un même événement (un double clic d'une ancienne version)
+  if (tout && params.has('doublons')) for (const statut of ['à confirmer', 'présent']) ajouterPresence(moiId, 3, statut);
 
   // --- Ce que Grist renvoie pour l'Annuaire selon les règles d'accès --------------------------
   function annuaireVisible() {

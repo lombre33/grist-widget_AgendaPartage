@@ -65,7 +65,7 @@ const LIBELLES = {
 };
 
 /* Numéro de version, affiché en bas de page : il permet de vérifier quelle version Grist a chargée (cache du navigateur). */
-const VERSION = '2026-10-20 · h';
+const VERSION = '2026-10-20 · i';
 
 const JOURS_SEMAINE = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
 const MOIS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
@@ -79,6 +79,7 @@ const etat = {
   logos: { parDomaine: new Map(), parNom: new Map() },   // index des logos, construit au chargement
   annuaire: [],                // une entrée par personne : { id, nom, prenom, domaine, etablissement, email }
   lignes: [],                  // présences lues en direct dans Participations : { id, evenement, utilisateur, statut }
+  lignesVides: [],             // lignes de Participations sans événement ni statut (lignes de connexion restées là)
   presences: [],               // ces présences, avec le nom, le prénom et le logo de la personne
   erreurAnnuaire: '',          // l’Annuaire n’a pas pu être lu
   connexion: null,             // { email, personne } : e-mail de connexion et ligne de l’Annuaire correspondante, null si indisponible
@@ -301,6 +302,8 @@ async function installerColonnes(existante, reparer) {
   if (actions.length) await grist.docApi.applyUserActions(actions);
 }
 
+const CONNEXION_INTROUVABLE = 'ligne de connexion introuvable';
+
 /** Ajoute une ligne dans Participations, lit ce que les formules y ont écrit, puis la supprime. */
 async function lireConnexion() {
   const c = CONFIG.participations;
@@ -309,7 +312,7 @@ async function lireConnexion() {
     id = (await grist.docApi.applyUserActions([['AddRecord', c.table, null, {}]])).retValues[0];
     const lues = await grist.docApi.fetchTable(c.table);
     const i = lues.id.indexOf(id);
-    if (i < 0) throw new Error('ligne de connexion introuvable');
+    if (i < 0) throw new Error(CONNEXION_INTROUVABLE);
     return { email: texte(lues[c.email][i]), personne: idLigne(lues[c.utilisateur][i]) };
   } finally {
     if (id != null) await grist.docApi.applyUserActions([['RemoveRecord', c.table, id]]).catch((err) => console.warn('Ligne de connexion non supprimée', err));
@@ -325,11 +328,13 @@ async function lireConnexion() {
 async function identifierParConnexion(existante) {
   const c = CONFIG.participations;
   try {
-    let connexion = await lireConnexion();
+    // Si ma ligne a été supprimée entre-temps (autre fenêtre ouverte au même moment), on recommence une fois
+    const lire = () => lireConnexion().catch((err) => (err && err.message === CONNEXION_INTROUVABLE ? lireConnexion() : Promise.reject(err)));
+    let connexion = await lire();
     if (!connexion.email && c.email in existante) {
       // Colonnes déjà là mais e-mail vide : elles ont sans doute été créées sans déclenchement. On les recrée une fois.
       await installerColonnes(existante, true);
-      connexion = await lireConnexion();
+      connexion = await lire();
     }
     etat.connexion = connexion;
     etat.detailConnexion = connexion.email ? '' : 'adresse de connexion vide';
@@ -415,13 +420,17 @@ function majPied(nbLignes) {
   el('version').textContent = `Version ${VERSION}${lignes}`;
 }
 
+/** Retient les lignes de Participations ({ id, evenement, utilisateur, statut }) : les présences d’un côté, les lignes de connexion de l’autre. */
+function memoriserLignes(lues) {
+  etat.lignes = lues.filter((l) => l.evenement && l.statut);   // les lignes de connexion (sans événement) ne sont pas des présences
+  etat.lignesVides = lues.filter((l) => !l.evenement && !l.statut);
+}
+
 /** Présences de Participations, en direct : Grist rappelle cette fonction à chaque changement de la table. */
 function recevoirPresences(enregistrements) {
   const c = CONFIG.participations;
   majPied(enregistrements.length);
-  etat.lignes = enregistrements
-    .map((r) => ({ id: r.id, evenement: idLigne(r[c.evenement]), utilisateur: idLigne(r[c.utilisateur]), statut: codeStatut(r[c.statut]) }))
-    .filter((l) => l.evenement && l.statut);   // les lignes de connexion (sans événement) ne sont pas des présences
+  memoriserLignes(enregistrements.map((r) => ({ id: r.id, evenement: idLigne(r[c.evenement]), utilisateur: idLigne(r[c.utilisateur]), statut: codeStatut(r[c.statut]) })));
   appliquerDonnees();
   confirmerMesChoix();
   preparerJeton(tousLesLogos()).then((nouveau) => nouveau && rendre());
@@ -528,6 +537,9 @@ async function ecrirePresence(evenementId, cible) {
   const miennes = etat.lignes.filter((l) => l.evenement === evenementId && l.utilisateur === etat.moi.id);
   const [gardee, ...doublons] = miennes;
   const actions = [];
+  // Ménage : mes lignes de connexion restées là (page fermée avant leur suppression) ne servent plus à rien
+  const restes = etat.lignesVides.filter((l) => l.utilisateur === etat.moi.id).map((l) => l.id);
+  if (restes.length) actions.push(['BulkRemoveRecord', c.table, restes]);
   if (!cible) {
     if (miennes.length) actions.push(['BulkRemoveRecord', c.table, miennes.map((l) => l.id)]);
   } else if (gardee) {
@@ -545,9 +557,12 @@ async function verifierEcriture(evenementId, cible) {
   const c = CONFIG.participations;
   const t = await grist.docApi.fetchTable(c.table);
   const colonne = (nom) => t[nom] || [];
-  const deLEvenement = t.id
-    .map((id, i) => ({ evenement: idLigne(colonne(c.evenement)[i]), utilisateur: idLigne(colonne(c.utilisateur)[i]), statut: codeStatut(colonne(c.statut)[i]) }))
-    .filter((l) => l.evenement === evenementId);
+  const lues = t.id.map((id, i) => ({ id, evenement: idLigne(colonne(c.evenement)[i]), utilisateur: idLigne(colonne(c.utilisateur)[i]), statut: codeStatut(colonne(c.statut)[i]) }));
+  // La prochaine action part de ce qui est vraiment enregistré, sans attendre que Grist rappelle recevoirPresences
+  // (sinon un second clic très proche du premier ajouterait une ligne de plus au lieu de modifier la première).
+  memoriserLignes(lues);
+  appliquerDonnees();
+  const deLEvenement = lues.filter((l) => l.evenement === evenementId);
   const miennes = deLEvenement.filter((l) => l.utilisateur === etat.moi.id);
   if (cible ? miennes.some((l) => l.statut === cible) : !miennes.length) return;
   if (cible && deLEvenement.some((l) => !l.utilisateur)) throw new Error(`ligne écrite sans « ${c.utilisateur} » : la formule « à la création » de « ${c.email} » n’a rien donné`);
