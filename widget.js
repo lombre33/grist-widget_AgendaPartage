@@ -63,6 +63,9 @@ const LIBELLES = {
   probable: { bouton: '? À confirmer', badge: 'À confirmer', resume: ['à confirmer', 'à confirmer'] },
 };
 
+/* Numéro de version, affiché en bas de page : il permet de vérifier quelle version Grist a chargée (cache du navigateur). */
+const VERSION = '2026-10-20 · d';
+
 const JOURS_SEMAINE = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
 const MOIS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
 
@@ -476,6 +479,20 @@ async function ecrirePresence(evenementId, cible) {
   if (actions.length) await grist.docApi.applyUserActions(actions);
 }
 
+/** Relit Participations après une écriture : la ligne doit y être, à mon nom, avec le bon statut (sinon on le dit, avec la raison). */
+async function verifierEcriture(evenementId, cible) {
+  const c = CONFIG.participations;
+  const t = await grist.docApi.fetchTable(c.table);
+  const colonne = (nom) => t[nom] || [];
+  const deLEvenement = t.id
+    .map((id, i) => ({ evenement: Number(colonne(c.evenement)[i]) || 0, utilisateur: Number(colonne(c.utilisateur)[i]) || 0, statut: codeStatut(colonne(c.statut)[i]) }))
+    .filter((l) => l.evenement === evenementId);
+  const miennes = deLEvenement.filter((l) => l.utilisateur === etat.moi.id);
+  if (cible ? miennes.some((l) => l.statut === cible) : !miennes.length) return;
+  if (cible && deLEvenement.some((l) => !l.utilisateur)) throw new Error(`ligne écrite sans « ${c.utilisateur} » : la formule « à la création » de « ${c.email} » n’a rien donné`);
+  throw new Error(cible ? `la ligne n’apparaît pas dans « ${c.table} » après l’écriture` : `la ligne est toujours dans « ${c.table} » après la suppression`);
+}
+
 /** Mes clics enregistrés disparaissent dès que Participations les reflète (ou, par sécurité, après un délai). */
 function confirmerMesChoix() {
   for (const [id, choix] of etat.choixEnCours) {
@@ -492,15 +509,17 @@ async function choisir(evenementId, valeur) {
   rendre();
   try {
     await ecrirePresence(evenementId, cible);
+    await verifierEcriture(evenementId, cible);
+    alerter('✓ Enregistré', 1500);
     const choix = etat.choixEnCours.get(evenementId);
     if (choix) Object.assign(choix, { ecrit: true, quand: Date.now() });
     confirmerMesChoix();   // Participations a peut-être déjà confirmé le choix pendant l’écriture
   } catch (err) {
     console.error(err);
     etat.choixEnCours.delete(evenementId);
-    alerter(/access|denied|blocked|permission/i.test(String(err && err.message))
-      ? 'Votre choix a été refusé par les règles d’accès du document. Contactez l’administrateur.'
-      : 'Votre choix n’a pas pu être enregistré. Réessayez dans un instant.');
+    const detail = texte(err && err.message).slice(0, 160);
+    const refus = /access|denied|blocked|permission/i.test(detail);
+    alerter(`${refus ? 'Votre choix a été refusé par les règles d’accès du document' : 'Votre choix n’a pas pu être enregistré'}${detail ? ` (${detail})` : ''}.`, 10000);
   }
   etat.verrous.delete(evenementId);
   rendre();
@@ -528,12 +547,12 @@ function afficherMessage(msg, erreur = false) {
 }
 
 let minuteurToast;
-function alerter(msg) {
+function alerter(msg, dureeMs = 5000) {
   const toast = el('toast');
   toast.textContent = msg;
   toast.hidden = false;
   clearTimeout(minuteurToast);
-  minuteurToast = setTimeout(() => { toast.hidden = true; }, 5000);
+  minuteurToast = setTimeout(() => { toast.hidden = true; }, dureeMs);
 }
 
 function rendreAvatar(p) {
@@ -727,6 +746,7 @@ document.addEventListener('error', (ev) => {
 if (typeof grist === 'undefined' || (window.self === window.top && !grist.simule)) {
   afficherMessage('Ce widget s’utilise dans Grist : ajoutez-le à une page via « Ajouter un widget > Personnalisé ».', true);
 } else {
+  el('version').textContent = `Version ${VERSION}`;
   grist.ready({ requiredAccess: 'full' });
   grist.onRecords(recevoirPresences, { includeColumns: 'all' });
   (async () => {

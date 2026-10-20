@@ -133,6 +133,7 @@ img.avatar { background: #fff; padding: 2px; box-shadow: 0 0 0 1px var(--filet);
 .pied { display: grid; gap: 16px; margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--filet); font-size: 0.8rem; color: var(--gris); }
 .pied__avant { padding: 14px 16px; border-radius: 4px; background: var(--rose); }
 .pied__avant h2 { margin-bottom: 4px; font-size: 1rem; color: var(--magenta); }
+.pied__version { font-size: 0.7rem; opacity: .7; }
 .pied__avant a { display: inline-block; margin-top: 8px; font-weight: 700; text-decoration: none; }
 
 /* ---------- Écrans moyens : une liste en deux colonnes ---------- */

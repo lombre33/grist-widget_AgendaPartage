@@ -15,6 +15,8 @@
                     ?sans-colonnes  Participations n'a pas encore ses colonnes : le widget doit les créer
                     ?sans-droits    ... mais la structure du document n'est pas modifiable par cette personne
                     ?ecriture-refusee  les règles d'accès refusent d'enregistrer, modifier ou supprimer une présence
+                    ?ecriture-perdue   Grist accepte l'écriture d'une présence mais la ligne n'existe pas ensuite
+                    ?utilisateur-vide  la ligne d'une présence est écrite sans « Utilisateur » (la formule « à la création » ne donne rien)
                     ?vide           démarrer sans aucune présence
 
    Pour les tests : window.MOCK_ACTIONS liste les lots d'actions reçus par applyUserActions. Toute action sur
@@ -140,7 +142,8 @@
             const declenche = !params.has('sans-declencheur') && colonnesParticipations.includes('Email') && (infosColonnes.Email || {}).recalcWhen !== 1;
             const email = declenche ? emailConnecte : '';
             const ligne = { id: prochaineParticipation++, Email: email, Utilisateur: personneDe(email), ...valeurs };
-            participations.push(ligne);
+            if (params.has('utilisateur-vide') && 'Evenement' in valeurs) ligne.Utilisateur = 0;
+            if (!(params.has('ecriture-perdue') && 'Evenement' in valeurs)) participations.push(ligne);
             retValues[retValues.length - 1] = ligne.id;
             notifier();
           } else if (type === 'UpdateRecord') {
