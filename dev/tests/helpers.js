@@ -37,6 +37,8 @@ function serveur() {
     if (fs.existsSync(chemin) && fs.statSync(chemin).isDirectory()) chemin = path.join(chemin, 'index.html');
     fs.readFile(chemin, (err, contenu) => {
       if (err) { res.writeHead(404).end('introuvable'); return; }
+      // Le Grist de test est en http : on l'ajoute aux sources d'images autorisées par la CSP de index.html (en production, https suffit).
+      if (chemin === path.join(RACINE, 'index.html')) contenu = contenu.toString().replace("img-src 'self' data: https:", `img-src 'self' data: https: ${process.env.GRIST_URL || 'http://127.0.0.1:8484'}`);
       res.writeHead(200, { 'Content-Type': TYPES[path.extname(chemin)] || 'application/octet-stream', 'Cache-Control': 'no-store' }).end(contenu);
     });
   });

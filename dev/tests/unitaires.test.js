@@ -305,6 +305,27 @@ describe('configuration', () => {
     for (const code of ['sur', 'probable']) assert.equal(await f('codeStatut', (await f('CONFIG.statuts'))[code]), code, 'chaque statut écrit est relu');
   });
 
+  test('index.html déclare une politique de sécurité (CSP) stricte : pas d\'eval, pas de script en ligne, aucun appel réseau', () => {
+    const html = require('node:fs').readFileSync(require('node:path').join(__dirname, '../../index.html'), 'utf8');
+    const csp = /<meta http-equiv="Content-Security-Policy" content="([^"]+)"/.exec(html);
+    assert.ok(csp, 'balise CSP absente');
+    const directives = Object.fromEntries(csp[1].split(';').map((d) => d.trim().split(/\s+/)).map(([nom, ...valeurs]) => [nom, valeurs]));
+    assert.deepEqual(directives['default-src'], ["'none'"]);
+    assert.deepEqual(directives['script-src'], ["'self'", 'https://docs.getgrist.com']);
+    assert.deepEqual(directives['connect-src'], ["'none'"]);
+    assert.ok(!/unsafe-(eval|inline)/.test(csp[1]), 'ni unsafe-eval ni unsafe-inline');
+    assert.ok(html.indexOf('Content-Security-Policy') < html.indexOf('<script'), 'la CSP précède tous les scripts');
+    assert.ok(!/<script(?![^>]*\bsrc=)/.test(html) && !/\son[a-z]+=/.test(html) && !/\sstyle=/.test(html), 'index.html ne contient ni script, ni gestionnaire, ni style en ligne');
+  });
+
+  test('rienAPerdre : les colonnes de connexion vides peuvent être recréées, pas celles qui contiennent des valeurs (même masquées)', async () => {
+    assert.equal(await f('rienAPerdre', { Email: ['', ''], Utilisateur: [0, 0] }), true);
+    assert.equal(await f('rienAPerdre', {}), true);
+    assert.equal(await f('rienAPerdre', { Email: ['', 'a@b.fr'], Utilisateur: [0, 0] }), false);
+    assert.equal(await f('rienAPerdre', { Email: ['', ''], Utilisateur: [0, 3] }), false);
+    assert.equal(await f('rienAPerdre', { Email: [['C'], ['C']], Utilisateur: [0, 0] }), false, 'valeur masquée par les règles d\'accès : on ne touche à rien');
+  });
+
   test('la version est affichée en bas de page', async () => {
     assert.match(await page.locator('#version').innerText(), new RegExp(`^Version ${(await f('VERSION')).replace('·', '·')}`));
   });

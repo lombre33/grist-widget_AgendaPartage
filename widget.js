@@ -74,7 +74,7 @@ const CIBLES = [
 ];
 
 /* Numéro de version, affiché en bas de page : il permet de vérifier quelle version Grist a chargée (cache du navigateur). */
-const VERSION = '2026-10-20 · j';
+const VERSION = '2026-10-20 · k';
 
 const JOURS_SEMAINE = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
 const MOIS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
@@ -311,7 +311,8 @@ const FORMULE_PERSONNE = [
 /**
  * Les colonnes de Participations. `recalcWhen: 0` + une formule = « formule à la création » : la colonne
  * est calculée à la création de la ligne (la valeur 1 la désactiverait).
- * Avec `reparer`, « Email » et « Utilisateur » sont recréées (une version précédente les créait mal).
+ * Avec `reparer`, « Email » et « Utilisateur » sont recréées (une version précédente les créait mal),
+ * mais seulement s’il n’y a rien à perdre : jamais quand l’une des deux contient déjà des valeurs.
  */
 async function installerColonnes(existante, reparer) {
   const c = CONFIG.participations;
@@ -321,12 +322,30 @@ async function installerColonnes(existante, reparer) {
     [c.evenement]: { type: `Ref:${CONFIG.tables.evenements}`, isFormula: false, label: 'Événement' },
     [c.statut]: { type: 'Choice', isFormula: false, widgetOptions: JSON.stringify({ choices: Object.values(CONFIG.statuts) }), label: 'Statut' },
   };
-  const aRecreer = reparer ? [c.email, c.utilisateur] : [];
+  const aRecreer = reparer && rienAPerdre(existante) ? [c.email, c.utilisateur] : [];
   const actions = aRecreer.filter((nom) => nom in existante).reverse().map((nom) => ['RemoveColumn', c.table, nom]);
   for (const [nom, definition] of Object.entries(definitions)) {
     if (!(nom in existante) || aRecreer.includes(nom)) actions.push(['AddColumn', c.table, nom, definition]);
   }
-  if (actions.length) await grist.docApi.applyUserActions(actions);
+  if (!actions.length) return;
+  const { retValues = [] } = (await grist.docApi.applyUserActions(actions)) || {};
+  // Une colonne que Grist a dû renommer (« Email2 ») existait déjà sans que le widget la voie (par exemple masquée
+  // par les règles d’accès) : on retire ce doublon, qui ne servirait à rien.
+  const doublons = actions.flatMap((a, i) => (a[0] === 'AddColumn' && retValues[i] && retValues[i].colId && retValues[i].colId !== a[2]
+    ? [['RemoveColumn', c.table, retValues[i].colId]] : []));
+  if (doublons.length) {
+    console.warn('Colonnes déjà existantes mais invisibles pour cette personne : doublons retirés', doublons.map((a) => a[2]));
+    await grist.docApi.applyUserActions(doublons);
+  }
+}
+
+/**
+ * Vrai si « Email » et « Utilisateur » de Participations ne contiennent encore aucune valeur.
+ * Une valeur masquée par les règles d’accès (reçue sous forme de liste, ['C']) compte comme un contenu.
+ */
+function rienAPerdre(existante) {
+  const c = CONFIG.participations;
+  return ![c.email, c.utilisateur].some((nom) => (existante[nom] || []).some((v) => v != null && v !== '' && v !== 0));
 }
 
 const CONNEXION_INTROUVABLE = 'ligne de connexion introuvable';
@@ -358,8 +377,9 @@ async function identifierParConnexion(existante) {
     // Si ma ligne a été supprimée entre-temps (autre fenêtre ouverte au même moment), on recommence une fois
     const lire = () => lireConnexion().catch((err) => (err && err.message === CONNEXION_INTROUVABLE ? lireConnexion() : Promise.reject(err)));
     let connexion = await lire();
-    if (!connexion.email && c.email in existante) {
-      // Colonnes déjà là mais e-mail vide : elles ont sans doute été créées sans déclenchement. On les recrée une fois.
+    if (!connexion.email && c.email in existante && rienAPerdre(existante)) {
+      // Colonnes déjà là mais e-mail vide : elles ont sans doute été créées sans déclenchement. On les recrée une fois
+      // (jamais si elles contiennent déjà des valeurs : ce serait les perdre).
       await installerColonnes(existante, true);
       connexion = await lire();
     }

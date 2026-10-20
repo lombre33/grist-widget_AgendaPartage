@@ -49,6 +49,7 @@ Grist ne dit pas au widget qui est connecté, mais il le donne aux formules éva
 - Aucune règle d’accès particulière sur l’e-mail n’est nécessaire : il peut rester lisible par tous dans l’`Annuaire`.
 - Si l’adresse de connexion n’est pas dans l’`Annuaire`, le widget affiche cette adresse et passe en lecture seule.
 - Repli, si la ligne ne peut pas être ajoutée : le widget prend la ligne de l’`Annuaire` dont l’e-mail est le seul lisible (règle `rec.email == user.Email` sur la colonne `email`). Sinon un message en haut de page donne la raison.
+- Colonnes de `Participations` : le widget crée celles qui manquent à la première ouverture par un propriétaire, et recrée `Email` et `Utilisateur` d’une version précédente seulement quand elles sont vides. Il ne supprime jamais une colonne qui contient déjà des valeurs, et retire de lui-même une colonne en double que Grist aurait créée (`Email2`) parce que la vraie lui est masquée par les règles d’accès.
 
 ## Règles d’accès
 
@@ -97,6 +98,11 @@ La colonne facultative `Cibles` de `Evenements` (type **Liste de choix**, choix 
 ## Hébergement
 GitHub Pages : *Settings* → *Pages* → *Deploy from a branch* → `main`, dossier `/ (root)`. L’URL du widget est alors `https://<compte>.github.io/<dépôt>/`.
 
+## Sécurité
+- Le widget a besoin de l’accès complet au document : le code publié ici s’exécute avec les droits de chaque personne qui ouvre la page, propriétaires compris. Protégez le compte GitHub (double authentification) et ne renommez ni le compte ni le dépôt sans mettre à jour l’adresse dans Grist.
+- `index.html` déclare une politique de sécurité (CSP, balise `<meta>`) : seuls ses propres fichiers et le script `https://docs.getgrist.com/grist-plugin-api.js` sont chargés, aucun appel réseau, pas de script ni de style en ligne, images en `https:`. Si vous ajoutez une ressource externe (police, image, script), ou si vous chargez `grist-plugin-api.js` depuis votre propre Grist, adaptez cette balise. Le script de Grist tente d’ajouter une feuille de style en ligne pour son thème : la politique la refuse, sans effet sur le widget (un message dans la console du navigateur).
+- Les règles d’accès (section ci-dessus) sont ce qui empêche de modifier les présences des autres : le widget ne les remplace pas.
+
 ## Changer un nom de table ou de colonne, ou un libellé
 - Noms de tables et de colonnes (dont les deux colonnes de présence) : bloc `CONFIG` en haut de `widget.js`.
 - Textes des boutons et des compteurs : `LIBELLES`, juste en dessous de `CONFIG`.
@@ -107,9 +113,9 @@ La batterie (`npm test`, soit `node --test dev/tests/*.test.js`) a trois étages
 
 | Étage | Fichier | Ce qu’il vérifie |
 | --- | --- | --- |
-| Unitaire | `dev/tests/unitaires.test.js` | les fonctions de `widget.js` (lecture des valeurs Grist, dates et heures, références `{ tableId, rowId }`, logos, établissements, participants, regroupements, liens de carte) |
+| Unitaire | `dev/tests/unitaires.test.js` | les fonctions de `widget.js` (lecture des valeurs Grist, dates et heures, références `{ tableId, rowId }`, logos, établissements, participants, regroupements, liens de carte) et la politique de sécurité de `index.html` |
 | Faux Grist | `dev/tests/faux-grist.test.js` | l’écran dans un navigateur : jours, filtre, boutons de choix, compteurs, liste des participants, messages d’erreur, toutes les options `?…` ci-dessous |
-| Vrai Grist | `dev/tests/grist-reel.test.js` | le widget dans l’image officielle de Grist, avec plusieurs personnes connectées en même temps : première ouverture, enregistrement, doublons et lignes oubliées, mise à jour en direct, règles d’accès d’Antoine (attribut utilisateur `acl`) sans rechargement de la page, règles recommandées ci-dessus (impossible d’écrire à la place d’un autre), lecteur, personne absente de l’Annuaire, logos en pièces jointes, lien de carte |
+| Vrai Grist | `dev/tests/grist-reel.test.js` | le widget dans l’image officielle de Grist, avec plusieurs personnes connectées en même temps : première ouverture, enregistrement, doublons et lignes oubliées, mise à jour en direct, règles d’accès d’Antoine (attribut utilisateur `acl`) sans rechargement de la page, règles recommandées ci-dessus (impossible d’écrire à la place d’un autre), lecteur, personne absente de l’Annuaire, logos en pièces jointes, lien de carte, colonne `Email` masquée (aucune colonne en trop, aucune donnée perdue), politique de sécurité (CSP) active |
 
 L’étage « vrai Grist » est ignoré tant que Grist ne répond pas. Pour le lancer (Docker requis, image `gristlabs/grist`) :
 

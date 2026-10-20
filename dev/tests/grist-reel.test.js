@@ -43,6 +43,8 @@ describe('vrai Grist', { skip: disponible ? false : `Grist ne répond pas sur ${
     const page = await contexte.newPage();
     page.erreurs = [];
     page.on('pageerror', (e) => page.erreurs.push(e.message));
+    page.violationsCsp = [];    // refus de la politique de sécurité (CSP) de index.html
+    page.on('console', (m) => { if (/Content Security Policy/.test(m.text())) page.violationsCsp.push(m.text()); });
     page.navigations = 0;       // chargements de la page Grist
     page.chargementsWidget = 0; // chargements du cadre du widget (Grist le recharge quand il recharge le document)
     page.on('framenavigated', (f) => {
@@ -413,6 +415,63 @@ describe('vrai Grist', { skip: disponible ? false : `Grist ne répond pas sur ${
       await widget.evaluate(() => chargerEvenements());
       await attendre(async () => (await carte(widget, 'salle changée').count()) === 1);
       assert.match(await carte(widget, 'salle changée').locator(SEL.lieu).innerText(), /Nouvelle salle/);
+    });
+  });
+
+  describe('sécurité du widget', () => {
+    test('colonne « Email » masquée aux éditeurs et structure modifiable : aucune colonne en trop, aucune présence perdue', async () => {
+      const doc = await nouveau();
+      const evt = await evenementId(doc, 'Atelier Durable');
+      await appliquer(JEANNE, doc.doc, [['AddRecord', 'Participations', null, { Evenement: evt, Statut: 'présent' }]]);
+      const [ressource] = await appliquer(PROPRIO, doc.doc, [['AddRecord', '_grist_ACLResources', null, { tableId: 'Participations', colIds: 'Email' }]]);
+      await appliquer(PROPRIO, doc.doc, [
+        ['AddRecord', '_grist_ACLRules', null, { resource: ressource, aclFormula: 'user.Access in [OWNER]', permissionsText: '+R', memo: '', rulePos: 1 }],
+        ['AddRecord', '_grist_ACLRules', null, { resource: ressource, aclFormula: '', permissionsText: '-R', memo: '', rulePos: 2 }],
+      ]);
+      const colonnesAvant = Object.keys(await colonnes(doc)).sort();
+      const avant = sansEcho(await participations(PROPRIO, doc));
+      assert.equal(avant.length, 1);
+      const { page } = await ouvrir(KARIM, doc);   // il ne voit pas la colonne : le widget ne doit pas en recréer une
+      await pause(1500);
+      assert.deepEqual(Object.keys(await colonnes(doc)).sort(), colonnesAvant, 'pas de colonne « Email2 »');
+      assert.deepEqual(sansEcho(await participations(PROPRIO, doc)), avant);
+      assert.deepEqual(page.erreurs, []);
+    });
+
+    test('des colonnes qui contiennent déjà des e-mails ne sont jamais supprimées par la « réparation »', async () => {
+      const doc = await nouveau({ preparer: false });
+      await appliquer(PROPRIO, doc.doc, [
+        ['AddColumn', 'Participations', 'Email', { type: 'Text', isFormula: false, formula: 'user.Email', recalcWhen: 1 }],
+        ['AddColumn', 'Participations', 'Utilisateur', { type: 'Ref:Annuaire', isFormula: true, formula: 'return None' }],
+        ['AddColumn', 'Participations', 'Evenement', { type: 'Ref:Evenements', isFormula: false }],
+        ['AddColumn', 'Participations', 'Statut', { type: 'Choice', isFormula: false }],
+      ]);
+      const evt = await evenementId(doc, 'Atelier Durable');
+      await appliquer(PROPRIO, doc.doc, [['AddRecord', 'Participations', null, { Email: JEANNE, Evenement: evt, Statut: 'présent' }]]);
+      const avant = sansEcho(await participations(PROPRIO, doc));
+      await ouvrir(PROPRIO, doc);
+      await pause(1500);
+      assert.equal((await colonnes(doc)).Email.recalcWhen, 1, 'la colonne n\'a pas été recréée');
+      assert.deepEqual(sansEcho(await participations(PROPRIO, doc)), avant, 'l\'e-mail de la présence est toujours là');
+    });
+
+    test('la politique de sécurité (CSP) est active et le widget fonctionne avec : logo en pièce jointe, choix enregistré', async () => {
+      const doc = await nouveau({ logos: true });
+      const { page, widget } = await ouvrir(JEANNE, doc);
+      assert.equal(await widget.evaluate(() => Boolean(document.querySelector('meta[http-equiv="Content-Security-Policy"]'))), true);
+      await attendre(async () => widget.locator(`${SEL.moi} img.avatar`).evaluate((i) => i.complete && i.naturalWidth > 0), { message: 'logo non chargé' });
+      const c = carte(widget, 'Atelier Durable');
+      await c.locator(SEL.present).click();
+      await attendre(async () => (await participations(PROPRIO, doc)).some((l) => l.Statut === 'présent'), { message: 'présence non enregistrée' });
+      // seule la feuille de style que le script de Grist ajoute pour son thème est refusée : sans effet sur le widget
+      assert.deepEqual(page.violationsCsp.filter((m) => !/inline style/.test(m)), []);
+      // et la politique refuse bien ce qu'elle doit refuser : appel réseau, script en ligne, script externe
+      assert.equal(await widget.evaluate(() => fetch('https://example.org/').then(() => 'ouvert', () => 'bloqué')), 'bloqué');
+      await widget.evaluate(() => { const s = document.createElement('script'); s.textContent = 'window.__enLigne = 1'; document.body.append(s); });
+      await attendre(() => page.violationsCsp.some((m) => /inline script/.test(m)), { message: 'script en ligne non refusé' });
+      assert.equal(await widget.evaluate(() => window.__enLigne), undefined);
+      await widget.evaluate(() => { const s = document.createElement('script'); s.src = 'https://exemple.invalid/x.js'; document.body.append(s); });
+      await attendre(() => page.violationsCsp.some((m) => /exemple\.invalid/.test(m)), { message: 'script externe non refusé' });
     });
   });
 });
