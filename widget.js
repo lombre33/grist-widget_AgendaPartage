@@ -64,7 +64,7 @@ const LIBELLES = {
 };
 
 /* Numéro de version, affiché en bas de page : il permet de vérifier quelle version Grist a chargée (cache du navigateur). */
-const VERSION = '2026-10-20 · f';
+const VERSION = '2026-10-20 · g';
 
 const JOURS_SEMAINE = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
 const MOIS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
@@ -107,6 +107,15 @@ const texte = (v) => (v == null || Array.isArray(v) ? '' : String(v)).trim();
 const echapper = (v) => texte(v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 const sansAccent = (v) => texte(v).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+
+/**
+ * Numéro de ligne d'une référence (colonne « Ref: ») : un nombre avec fetchTable, mais un objet
+ * { tableId, rowId } avec onRecords (ou ['R', table, numéro] si les valeurs restent encodées).
+ */
+function idLigne(v) {
+  const id = Array.isArray(v) ? v[2] : v && typeof v === 'object' ? v.rowId : v;
+  return Number(id) || 0;
+}
 
 /** Les listes Grist arrivent soit en tableau simple, soit encodées ['L', a, b]. */
 const liste = (v) => (Array.isArray(v) ? (v[0] === 'L' ? v.slice(1) : v) : []);
@@ -283,7 +292,7 @@ async function lireConnexion() {
     const lues = await grist.docApi.fetchTable(c.table);
     const i = lues.id.indexOf(id);
     if (i < 0) throw new Error('ligne de connexion introuvable');
-    return { email: texte(lues[c.email][i]), personne: Number(lues[c.utilisateur][i]) || 0 };
+    return { email: texte(lues[c.email][i]), personne: idLigne(lues[c.utilisateur][i]) };
   } finally {
     if (id != null) await grist.docApi.applyUserActions([['RemoveRecord', c.table, id]]).catch((err) => console.warn('Ligne de connexion non supprimée', err));
   }
@@ -382,18 +391,18 @@ function appliquerDonnees() {
 
 const tousLesLogos = () => etat.presences.map((p) => p.logo).concat(etat.moi ? [etat.moi.logo] : []);
 
-/** Présences de Participations, en direct : Grist rappelle cette fonction à chaque changement de la table. */
 /** Pied de page : la version du widget et ce que Participations contient vraiment (pour vérifier que les choix y arrivent). */
 function majPied(nbLignes) {
   const lignes = nbLignes == null ? '' : ` · ${nombre(nbLignes, ['ligne', 'lignes'])} dans « ${CONFIG.participations.table} »`;
   el('version').textContent = `Version ${VERSION}${lignes}`;
 }
 
+/** Présences de Participations, en direct : Grist rappelle cette fonction à chaque changement de la table. */
 function recevoirPresences(enregistrements) {
   const c = CONFIG.participations;
   majPied(enregistrements.length);
   etat.lignes = enregistrements
-    .map((r) => ({ id: r.id, evenement: Number(r[c.evenement]) || 0, utilisateur: Number(r[c.utilisateur]) || 0, statut: codeStatut(r[c.statut]) }))
+    .map((r) => ({ id: r.id, evenement: idLigne(r[c.evenement]), utilisateur: idLigne(r[c.utilisateur]), statut: codeStatut(r[c.statut]) }))
     .filter((l) => l.evenement && l.statut);   // les lignes de connexion (sans événement) ne sont pas des présences
   appliquerDonnees();
   confirmerMesChoix();
@@ -500,7 +509,7 @@ async function verifierEcriture(evenementId, cible) {
   const t = await grist.docApi.fetchTable(c.table);
   const colonne = (nom) => t[nom] || [];
   const deLEvenement = t.id
-    .map((id, i) => ({ evenement: Number(colonne(c.evenement)[i]) || 0, utilisateur: Number(colonne(c.utilisateur)[i]) || 0, statut: codeStatut(colonne(c.statut)[i]) }))
+    .map((id, i) => ({ evenement: idLigne(colonne(c.evenement)[i]), utilisateur: idLigne(colonne(c.utilisateur)[i]), statut: codeStatut(colonne(c.statut)[i]) }))
     .filter((l) => l.evenement === evenementId);
   const miennes = deLEvenement.filter((l) => l.utilisateur === etat.moi.id);
   if (cible ? miennes.some((l) => l.statut === cible) : !miennes.length) return;

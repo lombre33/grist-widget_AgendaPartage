@@ -1,7 +1,8 @@
 /* Faux Grist pour tester le widget dans un simple navigateur (voir dev/index.html).
    Il imite uniquement la partie de grist-plugin-api.js utilisée par widget.js,
    avec la même structure de tables que le document Grist (Annuaire, Etablissement, Evenements, Participations).
-   Les présences sont dans Participations (une ligne par présence) et arrivent en direct, comme dans Grist.
+   Les présences sont dans Participations (une ligne par présence) et arrivent en direct, comme dans Grist
+   (onRecords rend les références sous la forme { tableId, rowId }, fetchTable sous celle de simples numéros).
    Ne sert qu'au développement : il n'est jamais chargé par index.html.
 
    Options d'URL :  ?moi=2          se connecter comme la personne n° 2 (1 par défaut)
@@ -96,7 +97,10 @@
   window.MOCK_ACTIONS = [];
   window.MOCK_COLONNES = infosColonnes;   // définitions des colonnes créées dans Participations
   let rappel = null;
-  const notifier = () => setTimeout(() => rappel && rappel(participations.map((l) => ({ ...l })), null), 120);
+  // Dans onRecords (contrairement à fetchTable), Grist rend une référence sous la forme { tableId, rowId }
+  const reference = (tableId, rowId) => (rowId ? { tableId, rowId } : 0);
+  const enregistrements = () => participations.map((l) => ({ ...l, Utilisateur: reference('Annuaire', l.Utilisateur), Evenement: reference('Evenements', l.Evenement) }));
+  const notifier = () => setTimeout(() => rappel && rappel(enregistrements(), null), 120);
   const estMienne = (ligne) => (ligne.Email || '').toLowerCase() === emailConnecte.toLowerCase();
 
   window.grist = {
