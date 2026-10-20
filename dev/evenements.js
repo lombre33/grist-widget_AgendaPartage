@@ -13,6 +13,11 @@ window.MOCK_EVENEMENTS = [
   "Ville": "Pessac",
   "Adresse": "Salle 205, 4 avenue Denis Diderot, 33600 Pessac",
   "Public": "Enseignants-chercheurs, doctorants",
+  "Cibles": [
+   "L",
+   "Pédagogie",
+   "Recherche"
+  ],
   "Description": "Initiation au Transmedia Storytelling : concevoir en groupe une stratégie de récits multiplateformes pour valoriser un projet.",
   "Lien": "https://www.u-bordeaux.fr/evenements/le-transmedia-storytelling-comme-valorisation-de-projets"
  },
@@ -29,6 +34,11 @@ window.MOCK_EVENEMENTS = [
   "Ville": "Talence",
   "Adresse": "43 rue Pierre Noailles, 33400 Talence",
   "Public": "Personnels",
+  "Cibles": [
+   "L",
+   "Pédagogie",
+   "Recherche"
+  ],
   "Description": "Jeux de société détournés et défis de créativité pour découvrir les méthodes de l’innovation de façon ludique, sans prérequis.",
   "Lien": "https://www.u-bordeaux.fr/evenements/les-dejeuxners-de-linnovation"
  },
@@ -45,6 +55,11 @@ window.MOCK_EVENEMENTS = [
   "Ville": "Pessac",
   "Adresse": "16 avenue Pey Berland, 33600 Pessac",
   "Public": "Enseignants-chercheurs, chercheurs, personnels, étudiants",
+  "Cibles": [
+   "L",
+   "Pédagogie",
+   "Étudiants"
+  ],
   "Description": "Outils ludiques (jeu de société collaboratif, calculateur Ecobalyse) pour évaluer l’empreinte environnementale de produits.",
   "Lien": "https://www.u-bordeaux.fr/evenements/evaluer-pour-mieux-maitriser-les-impacts-environnementaux"
  },
@@ -61,6 +76,10 @@ window.MOCK_EVENEMENTS = [
   "Ville": "Talence",
   "Adresse": "Salle « île aux oiseaux », Avenue des Facultés, 33400 Talence",
   "Public": "Enseignants-chercheurs, accompagnants pédagogiques",
+  "Cibles": [
+   "L",
+   "Pédagogie"
+  ],
   "Description": "Atelier de co-conception pour imaginer des espaces d’apprentissage innovants et inclusifs, à partir de scénarios pédagogiques concrets.",
   "Lien": "https://www.u-bordeaux.fr/evenements/construisons-ensemble-un-espace-pour-apprendre-autrement"
  },
@@ -77,6 +96,13 @@ window.MOCK_EVENEMENTS = [
   "Ville": "Bordeaux",
   "Adresse": "",
   "Public": "Grand public",
+  "Cibles": [
+   "L",
+   "Pédagogie",
+   "Recherche",
+   "Étudiants",
+   "Entreprises"
+  ],
   "Description": "",
   "Lien": "https://www.u-bordeaux.fr/evenements/semaine-de-linnovation-2026-3e-edition"
  },
@@ -93,6 +119,10 @@ window.MOCK_EVENEMENTS = [
   "Ville": "Bordeaux",
   "Adresse": "2 rue du Dr Hoffmann Martinot, 33000 Bordeaux",
   "Public": "Enseignants-chercheurs, chercheurs, doctorants, étudiants de master",
+  "Cibles": [
+   "L",
+   "Recherche"
+  ],
   "Description": "Des binômes chercheur / industriel partagent leurs retours sur leurs collaborations ; présentation des dispositifs pour monter et financer des projets communs.",
   "Lien": "https://www.u-bordeaux.fr/evenements/entractes-regards-croises-sur-les-collaborations-entre-recherche-academique-en-sante-et-entreprise"
  },
@@ -109,6 +139,11 @@ window.MOCK_EVENEMENTS = [
   "Ville": "Talence",
   "Adresse": "Bâtiment A31, 351 cours de la Libération, 33400 Talence",
   "Public": "Enseignants-chercheurs, acteurs socio-économiques",
+  "Cibles": [
+   "L",
+   "Recherche",
+   "Entreprises"
+  ],
   "Description": "Matinée organisée par NOBATEK et l’université de Bordeaux (équipe GP2E) sur la performance énergétique et environnementale des bâtiments.",
   "Lien": "https://www.u-bordeaux.fr/evenements/matinale-scientifique-garantie-de-performances-energetiques-et-environnementales-des-batiments"
  },
@@ -125,6 +160,11 @@ window.MOCK_EVENEMENTS = [
   "Ville": "Gradignan",
   "Adresse": "1 cours du Général de Gaulle, 33170 Gradignan",
   "Public": "Étudiants, personnels, acteurs socio-économiques",
+  "Cibles": [
+   "L",
+   "Étudiants",
+   "Entreprises"
+  ],
   "Description": "Journée de présentations, témoignages et échanges sur les dispositifs d’appui à l’entrepreneuriat agricole et agroalimentaire, avec visite de la plateforme FarmLab@Bordeaux.",
   "Lien": "https://www.u-bordeaux.fr/evenements/un-terrain-fertile-pour-lentrepreneuriat-et-linnovation-au-service-des-transitions-agroecologiques"
  },
@@ -141,6 +181,10 @@ window.MOCK_EVENEMENTS = [
   "Ville": "Talence",
   "Adresse": "Esplanade des Arts et Métiers, 33400 Talence",
   "Public": "Enseignants-chercheurs, ingénieurs, professionnels de la formation",
+  "Cibles": [
+   "L",
+   "Pédagogie"
+  ],
   "Description": "Visite de la Learning Factory des Arts et Métiers : des plateformes pédagogiques proches de l’industrie, du prototypage à la production mécanique.",
   "Lien": "https://www.u-bordeaux.fr/evenements/les-evolutive-learning-factories-des-usines-ecoles-pour-apprendre-autrement"
  },
@@ -157,6 +201,10 @@ window.MOCK_EVENEMENTS = [
   "Ville": "Talence",
   "Adresse": "",
   "Public": "Étudiants",
+  "Cibles": [
+   "L",
+   "Étudiants"
+  ],
   "Description": "Jeux de société détournés et défis de créativité pour découvrir les méthodes de l’innovation de façon ludique, sans prérequis.",
   "Lien": "https://www.u-bordeaux.fr/evenements/les-dejeuxners-de-linnovation"
  },
@@ -173,6 +221,10 @@ window.MOCK_EVENEMENTS = [
   "Ville": "Talence",
   "Adresse": "",
   "Public": "Acteurs socio-économiques",
+  "Cibles": [
+   "L",
+   "Entreprises"
+  ],
   "Description": "Visite commentée du CATIE, centre de ressources technologiques du numérique : expertises, équipements et projets menés avec des entreprises.",
   "Lien": "https://www.u-bordeaux.fr/evenements/de-la-recheche-linnovation-concrete-en-entreprise-la-valeur-ajoutee-dun-centre-de-ressources-technologiques-comme-le-catie"
  },
@@ -189,6 +241,12 @@ window.MOCK_EVENEMENTS = [
   "Ville": "Talence",
   "Adresse": "740 cours de la Libération, 33400 Talence",
   "Public": "Architectes, ingénieurs, chercheurs, étudiants, professionnels de la construction et de la filière bois",
+  "Cibles": [
+   "L",
+   "Recherche",
+   "Étudiants",
+   "Entreprises"
+  ],
   "Description": "Visite des démonstrateurs THRIVE et TNEB : construire avec le hêtre et les feuillus locaux, la terre-paille et le chanvre. Départs des visites à 16 h et 17 h.",
   "Lien": "https://www.u-bordeaux.fr/evenements/construire-autrement-avec-le-hetre-la-terre-paille-et-le-chanvre"
  },
@@ -205,6 +263,11 @@ window.MOCK_EVENEMENTS = [
   "Ville": "Pessac",
   "Adresse": "4 avenue Denis Diderot, 33600 Pessac",
   "Public": "Étudiants et doctorants en sciences humaines et sociales",
+  "Cibles": [
+   "L",
+   "Recherche",
+   "Étudiants"
+  ],
   "Description": "Soirée en trois temps : table ronde, atelier collaboratif et pitchs d’étudiants autour de l’innovation en SHS.",
   "Lien": "https://www.u-bordeaux.fr/evenements/mardis-de-lentrepreneuriat-les-sciences-humaines-et-sociales-moteur-dinnovation"
  },
@@ -221,6 +284,11 @@ window.MOCK_EVENEMENTS = [
   "Ville": "Pessac",
   "Adresse": "Salle 205, 4 avenue Denis Diderot, 33600 Pessac",
   "Public": "Chercheurs en sciences humaines et sociales",
+  "Cibles": [
+   "L",
+   "Recherche",
+   "Entreprises"
+  ],
   "Description": "Transformer une première collaboration avec un acteur socio-économique en partenariat durable : témoignages et échanges avec des experts.",
   "Lien": "https://www.u-bordeaux.fr/evenements/faire-grandir-ses-partenariats-construire-des-collaborations-structurantes-en-sciences-humaines-et-sociales"
  },
@@ -237,6 +305,11 @@ window.MOCK_EVENEMENTS = [
   "Ville": "Talence",
   "Adresse": "Bâtiment A30, 351 cours de la Libération, 33400 Talence",
   "Public": "Chercheurs du numérique, personnels de la valorisation, acteurs socio-économiques",
+  "Cibles": [
+   "L",
+   "Recherche",
+   "Entreprises"
+  ],
   "Description": "Valoriser les logiciels de recherche en Open Source : visibilité, collaborations avec les entreprises, modèles économiques, licences.",
   "Lien": "https://www.u-bordeaux.fr/evenements/du-laboratoire-lentreprise-le-potentiel-de-lopen-source-issu-de-la-recherche"
  },
@@ -253,6 +326,11 @@ window.MOCK_EVENEMENTS = [
   "Ville": "Talence",
   "Adresse": "Entrée Agora, 43 rue Pierre Noailles, 33400 Talence",
   "Public": "Chercheurs, enseignants-chercheurs, industriels",
+  "Cibles": [
+   "L",
+   "Recherche",
+   "Entreprises"
+  ],
   "Description": "Journée autour des équipements de micro et nanofabrication du site bordelais pour définir une feuille de route technologique en photonique.",
   "Lien": "https://www.u-bordeaux.fr/evenements/micro-et-nanofabrication-pour-la-photonique-avancee"
  },
@@ -269,6 +347,10 @@ window.MOCK_EVENEMENTS = [
   "Ville": "Talence",
   "Adresse": "Bâtiment A31, 351 cours de la Libération, 33400 Talence",
   "Public": "Acteurs socio-économiques du secteur spatial",
+  "Cibles": [
+   "L",
+   "Entreprises"
+  ],
   "Description": "Découvrir les expertises, laboratoires et plateformes spatiales de l’université de Bordeaux, puis échanger avec les chercheurs (avec Aerospace Valley).",
   "Lien": "https://www.u-bordeaux.fr/evenements/explorer-lespace-avec-nos-experts"
  },
@@ -285,6 +367,11 @@ window.MOCK_EVENEMENTS = [
   "Ville": "Talence",
   "Adresse": "43 rue Pierre Noailles, 33400 Talence",
   "Public": "Enseignants-chercheurs, chercheurs, acteurs socio-économiques",
+  "Cibles": [
+   "L",
+   "Recherche",
+   "Entreprises"
+  ],
   "Description": "Les coulisses des collaborations laboratoires-entreprises et le rôle des cellules de transfert technologique.",
   "Lien": "https://www.u-bordeaux.fr/evenements/les-cellules-de-transfert-technologique-en-pratique"
  },
@@ -301,6 +388,10 @@ window.MOCK_EVENEMENTS = [
   "Ville": "Talence",
   "Adresse": "43 rue Pierre Noailles, 33400 Talence",
   "Public": "Acteurs socio-économiques (start-ups, deeptech, PME, ETI)",
+  "Cibles": [
+   "L",
+   "Entreprises"
+  ],
   "Description": "Rencontrer les plateformes technologiques de l’université de Bordeaux et découvrir leurs équipements et compétences.",
   "Lien": "https://www.u-bordeaux.fr/evenements/salon-des-entreprises-du-concept-au-demonstrateur"
  },
@@ -317,6 +408,10 @@ window.MOCK_EVENEMENTS = [
   "Ville": "Talence",
   "Adresse": "Bâtiment A31, 351 cours de la Libération, 33400 Talence",
   "Public": "Enseignants-chercheurs, chercheurs, acteurs socio-économiques",
+  "Cibles": [
+   "L",
+   "Recherche"
+  ],
   "Description": "Rencontres entre chercheurs du GIS Albatros et industriels pour identifier des sujets communs (micro-projets, études, thèses CIFRE).",
   "Lien": "https://www.u-bordeaux.fr/evenements/albatros-techno-day-2026"
  },
@@ -333,6 +428,10 @@ window.MOCK_EVENEMENTS = [
   "Ville": "Talence",
   "Adresse": "Salle « île aux oiseaux », Avenue des Facultés, 33400 Talence",
   "Public": "Enseignants-chercheurs",
+  "Cibles": [
+   "L",
+   "Pédagogie"
+  ],
   "Description": "Présentation de la plateforme CampusIABordeaux et de son usage avec les étudiants : publication, partage et réutilisation des données.",
   "Lien": "https://www.u-bordeaux.fr/evenements/campusiabordeaux-entrainez-vos-etudiants-sur-la-donnee"
  },
@@ -349,6 +448,10 @@ window.MOCK_EVENEMENTS = [
   "Ville": "Talence",
   "Adresse": "Salle « île aux oiseaux », Avenue des Facultés, 33400 Talence",
   "Public": "Enseignants-chercheurs",
+  "Cibles": [
+   "L",
+   "Pédagogie"
+  ],
   "Description": "Présentation du dispositif qui accompagne des projets d’acteurs de la société et co-construit des questions de recherche. Accueil café à 10 h 30, atelier à 10 h 45.",
   "Lien": "https://www.u-bordeaux.fr/evenements/echoppe-des-sciences-decouvrez-questionnez-adoptez"
  },
@@ -365,6 +468,10 @@ window.MOCK_EVENEMENTS = [
   "Ville": "Pessac",
   "Adresse": "",
   "Public": "Étudiants",
+  "Cibles": [
+   "L",
+   "Étudiants"
+  ],
   "Description": "Jeux de société détournés et défis de créativité pour découvrir les méthodes de l’innovation de façon ludique, sans prérequis.",
   "Lien": "https://www.u-bordeaux.fr/evenements/les-dejeuxners-de-linnovation"
  },
@@ -381,6 +488,11 @@ window.MOCK_EVENEMENTS = [
   "Ville": "Villenave-d’Ornon",
   "Adresse": "FabLabNab, bâtiment Tripode, 71 avenue Édouard Bourlaux, 33140 Villenave-d’Ornon",
   "Public": "Chercheurs, enseignants-chercheurs, doctorants",
+  "Cibles": [
+   "L",
+   "Pédagogie",
+   "Recherche"
+  ],
   "Description": "Visite du FabLabNab (impression 3D, découpe laser, prototypage rapide) et temps d’échange sur la science ouverte et l’innovation frugale.",
   "Lien": "https://www.u-bordeaux.fr/evenements/pepiniere-numerique-fablabnab-quand-la-fabrication-numerique-booste-linnovation"
  },
@@ -397,6 +509,12 @@ window.MOCK_EVENEMENTS = [
   "Ville": "Talence",
   "Adresse": "Esplanade des Arts et Métiers, 33400 Talence",
   "Public": "Enseignants-chercheurs, chercheurs, ingénieurs, doctorants, acteurs socio-économiques",
+  "Cibles": [
+   "L",
+   "Pédagogie",
+   "Recherche",
+   "Entreprises"
+  ],
   "Description": "Présentation-visite d’une cellule robotisée de fabrication additive métallique (WAAM) : fonctionnement, usages industriels et défis.",
   "Lien": "https://www.u-bordeaux.fr/evenements/la-robotique-au-service-de-la-fabrication-additive-metallique"
  },
@@ -413,6 +531,11 @@ window.MOCK_EVENEMENTS = [
   "Ville": "Bordeaux",
   "Adresse": "35 place Pey Berland, 33000 Bordeaux",
   "Public": "Docteurs et doctorants",
+  "Cibles": [
+   "L",
+   "Recherche",
+   "Entreprises"
+  ],
   "Description": "Soirée de rencontre entre docteurs, doctorants et entreprises bordelaises : témoignages, échanges en petits groupes et réseautage.",
   "Lien": "https://www.u-bordeaux.fr/evenements/afterwork-docteurs-doctorants-et-entreprises"
  },
@@ -429,6 +552,10 @@ window.MOCK_EVENEMENTS = [
   "Ville": "Pessac",
   "Adresse": "Salle 205, 4 avenue Denis Diderot, 33600 Pessac",
   "Public": "Enseignants-chercheurs",
+  "Cibles": [
+   "L",
+   "Pédagogie"
+  ],
   "Description": "Présentation de la plateforme CampusIABordeaux et de son usage avec les étudiants : publication, partage et réutilisation des données.",
   "Lien": "https://www.u-bordeaux.fr/evenements/campusiabordeaux-entrainez-vos-etudiants-sur-la-donnee"
  },
@@ -445,6 +572,11 @@ window.MOCK_EVENEMENTS = [
   "Ville": "Talence",
   "Adresse": "Bâtiment A31, 351 cours de la Libération, 33400 Talence",
   "Public": "Accompagnants à l’innovation, enseignants-chercheurs",
+  "Cibles": [
+   "L",
+   "Pédagogie",
+   "Recherche"
+  ],
   "Description": "Trois retours d’expérience sur des formations-accompagnements conçus sur mesure pour répondre à des besoins collectifs.",
   "Lien": "https://www.u-bordeaux.fr/evenements/des-formations-sur-mesure-pour-faire-evoluer-ses-pratiques"
  },
@@ -461,6 +593,7 @@ window.MOCK_EVENEMENTS = [
   "Ville": "Talence",
   "Adresse": "Bâtiment A31, 351 cours de la Libération, 33400 Talence",
   "Public": "Personnels administratifs",
+  "Cibles": null,
   "Description": "Jeu en équipes de 4 à 5 personnes pour tester sa connaissance de l’écosystème d’innovation bordelais et savoir orienter les porteurs de projets.",
   "Lien": "https://www.u-bordeaux.fr/evenements/le-pole-universitaire-dinnovation-bordeaux-en-jeu-venez-relever-le-defi"
  },
@@ -477,6 +610,10 @@ window.MOCK_EVENEMENTS = [
   "Ville": "Bordeaux",
   "Adresse": "Salle 32, bâtiment B, 3 ter place de la Victoire, 33000 Bordeaux",
   "Public": "Enseignants-chercheurs",
+  "Cibles": [
+   "L",
+   "Pédagogie"
+  ],
   "Description": "Présentation de la plateforme CampusIABordeaux et de son usage avec les étudiants : publication, partage et réutilisation des données.",
   "Lien": "https://www.u-bordeaux.fr/evenements/campusiabordeaux-entrainez-vos-etudiants-sur-la-donnee"
  }

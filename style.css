@@ -88,6 +88,21 @@ a { color: var(--magenta); -webkit-tap-highlight-color: transparent; }
 .filtre { min-height: 44px; padding: 6px 16px; border: 1px solid var(--magenta); border-radius: 999px; background: #fff; color: var(--magenta); font-weight: 700; }
 .filtre[aria-pressed="true"] { background: var(--magenta); color: #fff; }
 
+/* ---------- « Pour qui ? » : une rangée de bulles au-dessus des jours (comme des boutons radio, plusieurs possibles) ----------
+   Couleurs des quatre publics reprises des plannings imprimés ; elles ne servent qu’au point, le nom est toujours écrit. */
+.cible--pedagogie   { --cible: #ffcc00; }
+.cible--recherche   { --cible: #3f88c5; }
+.cible--etudiants   { --cible: #e0661a; }
+.cible--entreprises { --cible: #b9348b; }
+
+.cibles { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-bottom: 12px; }
+.cibles__bulles { display: contents; }
+.cibles__titre { margin-right: 2px; font-size: 0.85rem; color: var(--gris); }
+.bulle { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 4px 14px 4px 12px; border: 1px solid var(--filet); border-radius: 999px; background: #fff; font-size: 0.9rem; }
+.bulle__point { flex: none; width: 14px; height: 14px; border: 2px solid var(--cible); border-radius: 50%; background: #fff; box-shadow: 0 0 0 1px rgba(59, 28, 19, .25); }   /* bouton radio vide, cerclé de brun pour que le jaune se voie */
+.bulle[aria-pressed="true"] { border-color: var(--magenta); background: var(--magenta-clair); color: var(--magenta-fonce); font-weight: 700; }
+.bulle[aria-pressed="true"] .bulle__point { background: var(--cible); }   /* bouton radio plein */
+
 /* Légende des compteurs, quand les colonnes sont trop étroites pour écrire « présents » (grand écran) */
 .legende { display: none; }
 
@@ -189,13 +204,14 @@ img.avatar--probable { opacity: .6; }   /* seul le logo est atténué : les init
 @media (hover: hover) {
   .onglet:hover:not([aria-pressed="true"]) { background: var(--rose); border-color: var(--magenta); }
   .filtre:hover:not([aria-pressed="true"]) { background: var(--magenta-clair); }
+  .bulle:hover:not([aria-pressed="true"]) { background: var(--rose); border-color: var(--magenta); }
   .evt__qui:hover { background: var(--rose); }
   .evt--fort .evt__qui:hover { background: rgba(255, 255, 255, .35); }
   .evt__info:hover span { background: var(--magenta-clair); }
   .choix button:hover:not([aria-pressed="true"]) { background: var(--magenta-clair); border-color: var(--magenta); }
   .detail__tout:hover, .pied__avant a:hover { text-decoration: none; }
 }
-.onglet:active, .filtre:active, .evt__qui:active, .choix button:active, .evt__info:active, .detail__tout:active { filter: brightness(.94); }
+.onglet:active, .filtre:active, .bulle:active, .evt__qui:active, .choix button:active, .evt__info:active, .detail__tout:active { filter: brightness(.94); }
 
 /* ---------- Écrans moyens : une liste en deux colonnes ---------- */
 @media (min-width: 720px) {
@@ -218,13 +234,17 @@ img.avatar--probable { opacity: .6; }   /* seul le logo est atténué : les init
   .entete { margin-bottom: 8px; }
   .entete__logo { width: 96px; }
   .entete__lieu { display: none; }
+  .cibles { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .cibles__titre, .bulle { flex: none; white-space: nowrap; }
 }
 
 /* ---------- Grand écran : les cinq jours côte à côte, comme sur le planning papier ---------- */
 @media (min-width: 1180px) {
   body { font-size: 15px; }
   .onglets { display: none; }
-  .legende { display: block; margin: -8px 0 8px; font-size: 0.85rem; text-align: right; color: var(--gris); }
+  .barre-haute { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0 16px; margin-bottom: 8px; }
+  .barre-haute .cibles { margin-bottom: 4px; }
+  .legende { display: block; margin: 0 0 0 auto; font-size: 0.85rem; text-align: right; color: var(--gris); }
   .planning { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 16px; align-items: start; }
   .jour { display: block; }
   .jour--actif .jour__liste { display: block; }

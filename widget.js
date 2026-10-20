@@ -26,7 +26,7 @@ const CONFIG = {
   evenements: {
     jour: 'Jour', debut: 'Debut', fin: 'Fin', titre: 'Titre', sousTitre: 'Sous_titre',
     type: 'Type', tempsFort: 'Temps_fort', lieu: 'Lieu', ville: 'Ville',
-    adresse: 'Adresse', public: 'Public', description: 'Description', lien: 'Lien',
+    adresse: 'Adresse', public: 'Public', cibles: 'Cibles', description: 'Description', lien: 'Lien',
   },
   // Table liée au widget : une ligne par présence. Le widget y crée les colonnes ci-dessous si elles manquent.
   participations: {
@@ -64,6 +64,15 @@ const LIBELLES = {
   probable: { bouton: '? À confirmer', badge: 'À confirmer', resume: ['à confirmer', 'à confirmer'] },
 };
 
+/* Publics visés : les quatre publics des plannings imprimés, saisis dans la colonne « Cibles » de Evenements (liste de choix).
+   La rangée de bulles « Pour qui ? » n’apparaît que si cette colonne existe et contient au moins une valeur. Couleurs : style.css (.cible--code). */
+const CIBLES = [
+  { code: 'pedagogie',   libelle: 'Pédagogie',   qui: 'enseignants-chercheurs et professionnels de la formation et de la transformation pédagogique' },
+  { code: 'recherche',   libelle: 'Recherche',   qui: 'enseignants-chercheurs, chercheurs, doctorants' },
+  { code: 'etudiants',   libelle: 'Étudiants',   qui: 'étudiants' },
+  { code: 'entreprises', libelle: 'Entreprises', qui: 'acteurs socio-économiques' },
+];
+
 /* Numéro de version, affiché en bas de page : il permet de vérifier quelle version Grist a chargée (cache du navigateur). */
 const VERSION = '2026-10-20 · i';
 
@@ -94,6 +103,7 @@ const etat = {
   verrous: new Set(),          // evenements dont l’écriture est en cours
   jour: null,                  // onglet affiché (écrans étroits)
   seulementMesEvenements: false,
+  cibles: new Set(),           // codes des publics cochés dans « Pour qui ? » (aucun : tous les événements)
   ouverts: new Set(),          // evenements dont la liste des participants est dépliée
   infos: new Set(),            // evenements dont les informations pratiques sont dépliées
   toutVoir: new Set(),         // evenements dont la longue liste des participants est affichée en entier
@@ -123,6 +133,22 @@ function idLigne(v) {
 
 /** Les listes Grist arrivent soit en tableau simple, soit encodées ['L', a, b]. */
 const liste = (v) => (Array.isArray(v) ? (v[0] === 'L' ? v.slice(1) : v) : []);
+
+/** Code d’un public à partir de son libellé (sans tenir compte des accents ni des majuscules) ; null s’il est inconnu. */
+function codeCible(v) {
+  const s = sansAccent(v);
+  if (/^pedagog/.test(s)) return 'pedagogie';
+  if (/^recherch/.test(s)) return 'recherche';
+  if (/^etudiant/.test(s)) return 'etudiants';
+  if (/^(entreprise|acteurs? socio)/.test(s)) return 'entreprises';
+  return null;
+}
+
+/** Colonne « Cibles » : liste de choix (['L', 'a', 'b'] ou tableau) ou, si elle est restée en texte, valeurs séparées par des virgules. */
+function lireCibles(v) {
+  const trouvees = new Set((Array.isArray(v) ? liste(v) : texte(v).split(/[,;|\n]/)).map(codeCible));
+  return CIBLES.map((c) => c.code).filter((code) => trouvees.has(code));
+}
 
 const urlSure = (v) => (/^https?:\/\//i.test(texte(v)) ? texte(v) : '');
 
@@ -199,6 +225,7 @@ function normaliserEvenement(r) {
     ville: texte(r[c.ville]),
     adresse: texte(r[c.adresse]),
     public: texte(r[c.public]),
+    cibles: lireCibles(r[c.cibles]),
     description: texte(r[c.description]),
     lien: urlSure(r[c.lien]),
   };
@@ -602,6 +629,42 @@ async function choisir(evenementId, valeur) {
 }
 
 /* ----------------------------------------------------------------------------
+   Filtre « Pour qui ? » (colonne « Cibles » de Evenements)
+   ---------------------------------------------------------------------------- */
+const CLE_MEMOIRE = 'semaine-innovation-2026:cibles';
+
+/** Le choix de public est gardé sur l’appareil ; tout échec (navigation privée, stockage bloqué) est ignoré : tous les événements s’affichent. */
+function relireChoixCibles() {
+  try {
+    const m = JSON.parse(localStorage.getItem(CLE_MEMOIRE) || '[]');
+    etat.cibles = new Set((Array.isArray(m) ? m : []).filter((code) => CIBLES.some((c) => c.code === code)));
+  } catch (err) { /* rien à relire */ }
+}
+
+function garderChoixCibles() {
+  try { localStorage.setItem(CLE_MEMOIRE, JSON.stringify([...etat.cibles])); } catch (err) { /* rien à garder */ }
+}
+
+/** Les publics qui ont au moins un événement : sans colonne « Cibles » (ou vide), la rangée n’apparaît pas. */
+const ciblesUtilisees = () => CIBLES.filter((c) => etat.evenements.some((e) => e.cibles.includes(c.code)));
+
+/** Publics cochés qui ont des événements, recalculés à chaque affichage ; aucun coché : tous les événements sont retenus. */
+let choisis = new Set();
+const concerne = (e) => !choisis.size || e.cibles.some((code) => choisis.has(code));
+
+/** La rangée de bulles au-dessus des jours : un public par bulle, plusieurs possibles (un événement reste affiché s’il concerne l’un d’eux). */
+function rendreCibles(utilisees) {
+  const zone = el('cibles');
+  zone.hidden = !utilisees.length;
+  if (zone.hidden) return;
+  el('cibles-bulles').innerHTML = utilisees.map((c) => `
+    <button class="bulle cible--${c.code}" type="button" data-cible="${c.code}" data-focus="cible-${c.code}" aria-pressed="${choisis.has(c.code)}" title="${echapper(`${c.libelle} : ${c.qui}`)}">
+      <span class="bulle__point" aria-hidden="true"></span>${c.libelle}</button>`).join('');
+  const n = etat.evenements.filter(concerne).length;
+  el('cibles-nb').textContent = choisis.size ? `${nombre(n, ['événement', 'événements'])} sur ${etat.evenements.length}` : '';
+}
+
+/* ----------------------------------------------------------------------------
    Affichage
    ---------------------------------------------------------------------------- */
 const joursDuPlanning = () => [...new Set(etat.evenements.map((e) => e.jour))].sort();
@@ -843,10 +906,9 @@ function rendreOnglets(jours) {
 function rendrePlanning(jours) {
   el('planning').innerHTML = jours.map((iso) => {
     const j = infosJour(iso);
-    const evenements = etat.evenements.filter((e) => e.jour === iso && (!etat.seulementMesEvenements || monStatut(e.id)));
-    const contenu = evenements.length
-      ? evenements.map(rendreEvenement).join('')
-      : `<p class="jour__vide">${etat.seulementMesEvenements ? 'Vous n’avez pas encore choisi d’événement ce jour-là.' : 'Aucun événement.'}</p>`;
+    const evenements = etat.evenements.filter((e) => e.jour === iso && concerne(e) && (!etat.seulementMesEvenements || monStatut(e.id)));
+    const vide = etat.seulementMesEvenements ? 'Vous n’avez pas encore choisi d’événement ce jour-là.' : choisis.size ? 'Aucun événement pour ce public ce jour-là.' : 'Aucun événement.';
+    const contenu = evenements.length ? evenements.map(rendreEvenement).join('') : `<p class="jour__vide">${vide}</p>`;
     return `
       <section class="jour${iso === etat.jour ? ' jour--actif' : ''}" aria-label="${j.nom} ${j.numero} ${j.mois}">
         <header class="jour__tete">
@@ -872,7 +934,10 @@ function rendre() {
   const actif = document.activeElement;
   const cle = etat.focus || (actif && actif.dataset ? actif.dataset.focus : null);
   const jours = joursDuPlanning();
+  const utilisees = ciblesUtilisees();
+  choisis = new Set([...etat.cibles].filter((code) => utilisees.some((c) => c.code === code)));
   rendreEntete();
+  rendreCibles(utilisees);
   rendreOnglets(jours);
   rendrePlanning(jours);
   const cible = cle && document.querySelector(`[data-focus="${cle}"]:not(:disabled)`);
@@ -886,11 +951,14 @@ function rendre() {
    Interactions (délégation d’événements)
    ---------------------------------------------------------------------------- */
 document.addEventListener('click', (ev) => {
-  const cible = ev.target.closest('[data-action], [data-jour], #filtre');
+  const cible = ev.target.closest('[data-action], [data-jour], [data-cible], #filtre');
   if (!cible) return;
   etat.focus = cible.dataset.focus || null;
   if (cible.id === 'filtre') {
     etat.seulementMesEvenements = !etat.seulementMesEvenements;
+  } else if (cible.dataset.cible) {
+    if (!etat.cibles.delete(cible.dataset.cible)) etat.cibles.add(cible.dataset.cible);
+    garderChoixCibles();
   } else if (cible.dataset.jour) {
     etat.jour = cible.dataset.jour;
     const onglets = el('onglets');
@@ -930,6 +998,7 @@ if (typeof grist === 'undefined' || (window.self === window.top && !grist.simule
   afficherMessage('Ce widget s’utilise dans Grist : ajoutez-le à une page via « Ajouter un widget > Personnalisé ».', true);
 } else {
   majPied();
+  relireChoixCibles();
   grist.ready({ requiredAccess: 'full' });
   grist.onRecords(recevoirPresences, { includeColumns: 'all' });
   (async () => {

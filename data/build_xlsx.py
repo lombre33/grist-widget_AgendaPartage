@@ -24,7 +24,7 @@ PROGRAMME = SITE + "semaine-de-linnovation-2026-3e-edition"
 COLONNES = [
     ("Jour", 12), ("Debut", 8), ("Fin", 8), ("Titre", 44), ("Sous_titre", 44),
     ("Type", 18), ("Temps_fort", 24), ("Lieu", 38), ("Ville", 16), ("Adresse", 44),
-    ("Public", 40), ("Description", 70), ("Lien", 60),
+    ("Public", 40), ("Cibles", 30), ("Description", 70), ("Lien", 60),
 ]
 
 LUN, MAR, MER, JEU, VEN = (date(2026, 11, d) for d in (23, 24, 25, 26, 27))
@@ -37,6 +37,52 @@ HAUT_CARRE = "43 rue Pierre Noailles, 33400 Talence"
 IMS = "351 cours de la Libération, 33400 Talence"
 ARTS_METIERS = "Esplanade des Arts et Métiers, 33400 Talence"
 BU_ST = "Avenue des Facultés, 33400 Talence"
+
+# Publics visés, d'après les quatre plannings par public (Pédagogie, Recherche, Étudiants, Entreprises) : une séance
+# est « pour » un public quand elle est surlignée sur son planning. Valeurs de la colonne « Cibles » (liste de choix).
+PEDAGOGIE, RECHERCHE, ETUDIANTS, ENTREPRISES = "Pédagogie", "Recherche", "Étudiants", "Entreprises"
+TOUS = (PEDAGOGIE, RECHERCHE, ETUDIANTS, ENTREPRISES)
+
+# (jour, début, titre) -> publics. Une séance absente de cette table n'est surlignée sur aucun planning.
+CIBLES = {
+    (LUN, "09:30", "Le Transmedia Storytelling comme valorisation de projets"): (PEDAGOGIE, RECHERCHE),
+    (LUN, "11:30", "Les DéJEUXners de l’innovation"): (PEDAGOGIE, RECHERCHE),
+    (LUN, "14:00", "Construisons ensemble un espace pour apprendre autrement"): (PEDAGOGIE,),
+    (LUN, "14:00", "Atelier Durable"): (PEDAGOGIE, ETUDIANTS),
+    (LUN, "18:00", "Conférence « L’IA au service des patients : quelles innovations en santé ? »"): TOUS,
+    (MAR, "09:00", "Entrepreneuriat et innovation au service des transitions agroécologiques"): (ETUDIANTS, ENTREPRISES),
+    (MAR, "09:00", "Entractes : regards croisés sur les collaborations entre recherche académique en santé et entreprise"): (RECHERCHE,),
+    (MAR, "09:00", "Matinale scientifique"): (RECHERCHE, ENTREPRISES),
+    (MAR, "11:00", "Les Evolutive Learning Factories, des usines-écoles pour apprendre autrement"): (PEDAGOGIE,),
+    (MAR, "11:30", "Les DéJEUXners de l’innovation"): (ETUDIANTS,),
+    (MAR, "14:00", "De la recherche à l’innovation concrète en entreprise : la valeur ajoutée d’un Centre de Ressources Technologiques comme le CATIE"): (ENTREPRISES,),
+    (MAR, "16:00", "Construire autrement avec le hêtre, la terre-paille et le chanvre"): (RECHERCHE, ETUDIANTS, ENTREPRISES),
+    (MAR, "18:30", "Mardis de l’entrepreneuriat"): (RECHERCHE, ETUDIANTS),
+    (MER, "09:00", "Faire grandir ses partenariats"): (RECHERCHE, ENTREPRISES),
+    (MER, "10:00", "Micro et nanofabrication pour la photonique avancée"): (RECHERCHE, ENTREPRISES),
+    (MER, "10:00", "Du laboratoire à l’entreprise, le potentiel de l’Open Source issu de la recherche"): (RECHERCHE, ENTREPRISES),
+    (MER, "14:00", "Explorer l’Espace avec nos experts"): (ENTREPRISES,),
+    (MER, "17:40", "Les cellules de transfert technologique en pratique"): (RECHERCHE, ENTREPRISES),
+    (MER, "18:30", "Soirée des entreprises"): (ENTREPRISES,),
+    (JEU, "09:00", "Albatros Techno Day 2026"): (RECHERCHE,),
+    (JEU, "09:30", "CampusIABordeaux"): (PEDAGOGIE,),
+    (JEU, "10:30", "L’Échoppe des Sciences"): (PEDAGOGIE,),
+    (JEU, "11:30", "Les DéJEUXners de l’innovation"): (ETUDIANTS,),
+    (JEU, "13:00", "Pépinière numérique FabLabNab"): (PEDAGOGIE, RECHERCHE),
+    (JEU, "14:00", "La robotique au service de la fabrication additive métallique"): (PEDAGOGIE, RECHERCHE, ENTREPRISES),
+    (JEU, "17:30", "Afterwork docteurs, doctorants et entreprises"): (RECHERCHE, ENTREPRISES),
+    (VEN, "09:00", "CampusIABordeaux"): (PEDAGOGIE,),
+    (VEN, "09:00", "Des formations sur mesure pour faire évoluer ses pratiques"): (PEDAGOGIE, RECHERCHE),
+    (VEN, "11:30", "CampusIABordeaux"): (PEDAGOGIE,),
+    # Vendredi 11 h, Serious game « No wrong door » : surligné sur aucun des quatre plannings (public : personnels administratifs).
+}
+
+
+def cibles_de(jour, debut, titre):
+    """Publics d'une séance, dans l'ordre Pédagogie, Recherche, Étudiants, Entreprises, séparés par des virgules."""
+    publics = CIBLES.get((jour, debut, titre), ())
+    return ", ".join(c for c in TOUS if c in publics)
+
 
 # (jour, début, fin, titre, sous-titre, type, temps fort, lieu, ville, adresse, public, description, fiche)
 EVENEMENTS = [
@@ -214,11 +260,11 @@ def construire(chemin):
     for r, (jour, debut, fin, titre, sous, type_, fort, lieu, ville, adresse, public, desc, slug) in enumerate(lignes, start=2):
         lien = PROGRAMME if slug is None else SITE + slug
         valeurs = [jour, debut, fin or None, titre, sous or None, type_, fort or None,
-                   lieu, ville, adresse or None, public, desc or None, lien]
+                   lieu, ville, adresse or None, public, cibles_de(jour, debut, titre) or None, desc or None, lien]
         for c, v in enumerate(valeurs, start=1):
             cell = ws.cell(row=r, column=c, value=v)
             cell.font = Font(name=police)
-            cell.alignment = Alignment(vertical="top", wrap_text=c in (4, 5, 8, 10, 11, 12))
+            cell.alignment = Alignment(vertical="top", wrap_text=c in (4, 5, 8, 10, 11, 13))
         ws.cell(row=r, column=1).number_format = "yyyy-mm-dd"
         # heures en texte « 09:30 » : évite toute conversion de fuseau ou de format à l'import
         ws.cell(row=r, column=2).number_format = "@"
@@ -228,6 +274,13 @@ def construire(chemin):
     ws.auto_filter.ref = ws.dimensions
     wb.save(chemin)
     return len(lignes)
+
+
+def verifier_cibles():
+    cles = {(e[0], e[1], e[3]) for e in EVENEMENTS}
+    inconnues = [c for c in CIBLES if c not in cles]
+    if inconnues:
+        raise SystemExit(f"CIBLES : séance introuvable {inconnues}")
 
 
 def lignes_triees():
@@ -240,8 +293,10 @@ def ecrire_donnees_dev(chemin):
     lignes = []
     for i, e in enumerate(lignes_triees(), start=1):
         jour, debut, fin, titre, sous, type_, fort, lieu, ville, adresse, public, desc, slug = e
-        valeurs = [timegm(jour.timetuple()), debut, fin, titre, sous, type_, fort, lieu, ville, adresse, public, desc,
-                   PROGRAMME if slug is None else SITE + slug]
+        cibles = [c for c in cibles_de(jour, debut, titre).split(", ") if c]
+        valeurs = [timegm(jour.timetuple()), debut, fin, titre, sous, type_, fort, lieu, ville, adresse, public,
+                   ["L", *cibles] if cibles else None,   # liste de choix : Grist la renvoie sous la forme ['L', 'a', 'b']
+                   desc, PROGRAMME if slug is None else SITE + slug]
         lignes.append({"id": i, **dict(zip(noms, valeurs))})
     with open(chemin, "w", encoding="utf-8") as f:
         f.write("// Généré par data/build_xlsx.py — ne pas modifier à la main.\n")
@@ -249,6 +304,7 @@ def ecrire_donnees_dev(chemin):
 
 
 if __name__ == "__main__":
+    verifier_cibles()
     sortie = sys.argv[1] if len(sys.argv) > 1 else "data/Evenements_Semaine_Innovation_2026.xlsx"
     print(f"{construire(sortie)} séances écrites dans {sortie}")
     ecrire_donnees_dev("dev/evenements.js")

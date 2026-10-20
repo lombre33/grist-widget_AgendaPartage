@@ -141,6 +141,79 @@ describe('affichage', () => {
   });
 });
 
+describe('publics visés (Pour qui ?)', () => {
+  const bulle = (page, code) => page.locator(`[data-cible="${code}"]`);
+  const titres = (page) => page.locator(`${SEL.evenement} .evt__titre`).allInnerTexts();
+
+  test('une bulle par public au-dessus des jours, aucune cochée au départ, rien de changé sur les fiches', async () => {
+    const page = await ouvrir();
+    assert.deepEqual(await page.locator('.bulle').allInnerTexts(), ['Pédagogie', 'Recherche', 'Étudiants', 'Entreprises']);
+    assert.equal(await page.locator('.bulle[aria-pressed="true"]').count(), 0);
+    assert.equal(await page.locator(SEL.evenement).count(), 30);
+    assert.equal(await page.locator(`${SEL.evenement} .cible, ${SEL.evenement} .bulle`).count(), 0, 'les fiches ne montrent aucun public');
+    aucuneErreur(page);
+  });
+
+  test('cocher un public ne garde que ses événements, plusieurs publics s\'additionnent, décocher revient à tout', async () => {
+    const page = await ouvrir();
+    await bulle(page, 'etudiants').click();
+    assert.equal(await page.locator(SEL.evenement).count(), 7);
+    assert.equal(await bulle(page, 'etudiants').getAttribute('aria-pressed'), 'true');
+    assert.match(await page.locator('#cibles-nb').innerText(), /^7 événements sur 30$/);
+    await bulle(page, 'recherche').click();
+    assert.equal(await page.locator(SEL.evenement).count(), 20);   // 7 + 16, dont 3 en commun
+    await bulle(page, 'etudiants').click();
+    await bulle(page, 'recherche').click();
+    assert.equal(await page.locator(SEL.evenement).count(), 30);
+    aucuneErreur(page);
+  });
+
+  test('la conférence ouverte aux quatre publics reste, l\'événement sans public disparaît dès qu\'on filtre', async () => {
+    const page = await ouvrir();
+    assert.equal(await carte(page, 'No wrong door').count(), 1);
+    await bulle(page, 'entreprises').click();
+    assert.equal(await carte(page, 'L’IA au service des patients').count(), 1);
+    assert.equal(await carte(page, 'No wrong door').count(), 0);
+    assert.equal(await page.locator(SEL.evenement).count(), 13);
+  });
+
+  test('jour sans événement pour ce public : un message, et « Mon programme » se combine au filtre', async () => {
+    const page = await ouvrir();
+    await bulle(page, 'etudiants').click();
+    assert.deepEqual(await page.locator('.jour__vide').allInnerTexts(), ['Aucun événement pour ce public ce jour-là.', 'Aucun événement pour ce public ce jour-là.']);
+    await page.click(SEL.filtre);
+    assert.equal(await page.locator(SEL.evenement).count(), 0);   // Camille n'a choisi aucun événement pour les étudiants
+    assert.equal(await page.locator('.jour__vide').count(), 5);
+    aucuneErreur(page);
+  });
+
+  test('le choix est gardé au rechargement ; un choix illisible est ignoré', async () => {
+    const page = await ouvrir();
+    await bulle(page, 'recherche').click();
+    await page.reload();
+    await page.waitForSelector(SEL.evenement);
+    assert.equal(await bulle(page, 'recherche').getAttribute('aria-pressed'), 'true');
+    assert.equal(await page.locator(SEL.evenement).count(), 16);
+    await page.evaluate(() => localStorage.setItem('semaine-innovation-2026:cibles', '{pas du json'));
+    await page.reload();
+    await page.waitForSelector(SEL.evenement);
+    assert.equal(await page.locator(SEL.evenement).count(), 30);
+  });
+
+  test('sans colonne Cibles, la rangée n\'apparaît pas et le planning est inchangé', async () => {
+    const page = await ouvrir({ requete: '?sans-cibles' });
+    assert.equal(await page.locator('#cibles').isVisible(), false);
+    assert.equal(await page.locator(SEL.evenement).count(), 30);
+    aucuneErreur(page);
+  });
+
+  test('petit mobile : les bulles tiennent sans défilement horizontal de la page', async () => {
+    const page = await ouvrir({ largeur: 320, hauteur: 640 });
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
+    assert.equal(await page.locator('.bulle:visible').count(), 4);
+  });
+});
+
 describe('lieu et carte', () => {
   test('le lieu est un lien Google Maps (adresse si elle existe), dans un nouvel onglet', async () => {
     const page = await ouvrir();

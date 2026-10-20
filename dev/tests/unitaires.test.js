@@ -123,13 +123,25 @@ describe('événements', () => {
   test('normaliserEvenement : nettoie chaque champ', async () => {
     assert.deepEqual(await f('normaliserEvenement', ligne), {
       id: 4, jour: '2026-11-24', debut: { h: 14, m: 0 }, fin: { h: 16, m: 0 }, titre: 'Atelier', sousTitre: '', type: 'Atelier', tempsFort: '',
-      lieu: 'BU', ville: 'Talence', adresse: '1 rue X', public: 'Tous', description: 'Texte', lien: '',
+      lieu: 'BU', ville: 'Talence', adresse: '1 rue X', public: 'Tous', cibles: [], description: 'Texte', lien: '',
     });
   });
 
   test('normaliserEvenement : colonnes absentes ou masquées', async () => {
     const e = await f('normaliserEvenement', { id: 1, Jour: '2026-11-23', Titre: 'X', Lieu: ['C'] });
     assert.equal(e.lieu, ''); assert.equal(e.debut, null); assert.equal(e.fin, null); assert.equal(e.lien, '');
+  });
+
+  test('lireCibles : liste de choix, tableau ou texte ; accents et casse ignorés, valeurs inconnues écartées, ordre des pastilles', async () => {
+    assert.deepEqual(await f('lireCibles', ['L', 'Recherche', 'Pédagogie']), ['pedagogie', 'recherche']);
+    assert.deepEqual(await f('lireCibles', ['étudiants', 'Entreprises']), ['etudiants', 'entreprises']);
+    assert.deepEqual(await f('lireCibles', 'pedagogie, ETUDIANTS ; Acteurs socio-économiques'), ['pedagogie', 'etudiants', 'entreprises']);
+    assert.deepEqual(await f('lireCibles', ['L', 'Grand public', 'Recherche']), ['recherche']);
+    for (const vide of [null, undefined, '', ['C'], ['L'], 12]) assert.deepEqual(await f('lireCibles', vide), []);
+  });
+
+  test('normaliserEvenement : publics visés lus dans la colonne Cibles', async () => {
+    assert.deepEqual((await f('normaliserEvenement', { ...ligne, Cibles: ['L', 'Étudiants', 'Recherche'] })).cibles, ['recherche', 'etudiants']);
   });
 
   test('lienCarte : adresse, sinon lieu et ville, sinon rien ; caractères encodés', async () => {

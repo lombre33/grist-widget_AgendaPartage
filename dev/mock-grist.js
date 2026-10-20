@@ -20,6 +20,7 @@
                     ?utilisateur-vide  la ligne d'une présence est écrite sans « Utilisateur » (la formule « à la création » ne donne rien)
                     ?doublons       deux lignes à mon nom pour l'événement 3 (« à confirmer » et « présent »)
                     ?orphelines     deux lignes de connexion restées dans Participations (la sienne et celle d'une autre personne)
+                    ?sans-cibles    la table Evenements n'a pas la colonne Cibles (le filtre « Pour qui ? » n'apparaît pas)
                     ?vide           démarrer sans aucune présence
                     ?foule          60 personnes de plus inscrites à l'événement 3 (liste longue, groupée par établissement)
 
@@ -134,7 +135,11 @@
     docApi: {
       async fetchTable(nom) {
         await attendre(40);
-        if (nom === 'Evenements') return enColonnes(window.MOCK_EVENEMENTS);
+        if (nom === 'Evenements') {
+          const t = enColonnes(window.MOCK_EVENEMENTS);
+          if (params.has('sans-cibles')) delete t.Cibles;
+          return t;
+        }
         if (nom === 'Annuaire') return enColonnes(annuaireVisible(), ['id', 'prenom', 'nom', 'email', 'Etablissement', 'nom_de_domaine']);
         if (nom === 'Etablissement') return enColonnes(ETABLISSEMENTS);
         if (nom === 'Participations') return enColonnes(participations, ['id', ...colonnesParticipations]);
@@ -192,6 +197,7 @@
 
   // --- Petite barre de test : simuler le comportement des autres participants -----------------
   window.addEventListener('DOMContentLoaded', () => {
+    if (window.MOCK_SANS_BARRE) return;   // maquettes : pas de barre de test
     const barre = document.createElement('div');
     barre.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:20;display:flex;gap:8px;align-items:center;padding:6px 12px;background:#222;color:#fff;font:12px Arial';
     barre.innerHTML = '<span>Faux Grist</span><button id="simuler" style="font:inherit">Un autre participant bouge</button><span id="simuler-info" style="opacity:.7"></span>';

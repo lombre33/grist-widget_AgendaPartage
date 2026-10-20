@@ -40,7 +40,11 @@ function evenements() {
   return evenementsLus;
 }
 
-async function creerDocument(nom = 'Semaine de l’innovation (test)', { widget = WIDGET, acces = 'full' } = {}) {
+/** Les quatre publics de la colonne « Cibles » (liste de choix) de la table Evenements. */
+const CHOIX_CIBLES = ['Pédagogie', 'Recherche', 'Étudiants', 'Entreprises'];
+
+/** `cibles: false` : une table Evenements sans la colonne « Cibles », comme avant son ajout. */
+async function creerDocument(nom = 'Semaine de l’innovation (test)', { widget = WIDGET, acces = 'full', cibles = true } = {}) {
   const [{ id: espace }] = await api(PROPRIETAIRE, 'GET', '/orgs/current/workspaces');
   const doc = await api(PROPRIETAIRE, 'POST', `/workspaces/${espace}/docs`, { name: nom });
   const liste = evenements();
@@ -48,7 +52,8 @@ async function creerDocument(nom = 'Semaine de l’innovation (test)', { widget 
   await appliquer(PROPRIETAIRE, doc, [
     ['AddTable', 'Annuaire', colonnes(['nom', 'prenom', 'Etablissement', 'email', 'Fonction', 'nom_de_domaine', 'email_affiche'])],
     ['AddTable', 'Etablissement', [...colonnes(['Nom_complet', 'Acronyme', 'nom_de_domaine']), { id: 'Logo', type: 'Attachments', isFormula: false }]],
-    ['AddTable', 'Evenements', [{ id: 'Jour', type: 'Date', isFormula: false }, ...colonnes(cles)]],
+    ['AddTable', 'Evenements', [{ id: 'Jour', type: 'Date', isFormula: false }, ...colonnes(cles),
+      ...(cibles ? [{ id: 'Cibles', type: 'ChoiceList', isFormula: false, widgetOptions: JSON.stringify({ choices: CHOIX_CIBLES }) }] : [])]],
     // Comme dans le vrai document : une table neuve, avec ses trois colonnes A, B, C par défaut
     ['AddTable', 'Participations', ['A', 'B', 'C'].map((id) => ({ id, type: 'Any', isFormula: true, formula: '' }))],
   ]);
@@ -59,7 +64,8 @@ async function creerDocument(nom = 'Semaine de l’innovation (test)', { widget 
       prenom: PERSONNES.map((p) => p[0]), nom: PERSONNES.map((p) => p[1]), nom_de_domaine: PERSONNES.map((p) => p[2]),
       Etablissement: PERSONNES.map((p) => p[3]), email: PERSONNES.map(emailDe), email_affiche: PERSONNES.map(emailDe), Fonction: PERSONNES.map(() => 'Chargé·e de mission') }],
     ['BulkAddRecord', 'Evenements', liste.map(() => null), {
-      Jour: liste.map((e) => e.Jour), ...Object.fromEntries(cles.map((c) => [c, lots(c, liste)])) }],
+      Jour: liste.map((e) => e.Jour), ...Object.fromEntries(cles.map((c) => [c, lots(c, liste)])),
+      ...(cibles ? { Cibles: liste.map((e) => e.Cibles || null) } : {}) }],
   ]);
 
   // Page « Planning » : un widget personnalisé (URL) lié à Participations

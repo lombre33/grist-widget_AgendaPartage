@@ -24,7 +24,14 @@
 
   <div class="etat" id="etat" role="status" aria-live="polite">Chargement du planning…</div>
 
-  <p class="legende" aria-hidden="true">✓ présent · ? à confirmer</p>
+  <div class="barre-haute">
+    <div class="cibles" id="cibles" role="group" aria-labelledby="cibles-titre" hidden>
+      <span class="cibles__titre" id="cibles-titre">Pour qui ?</span>
+      <span class="cibles__bulles" id="cibles-bulles"></span>
+      <p class="sr-only" id="cibles-nb" role="status"></p>
+    </div>
+    <p class="legende" aria-hidden="true">✓ présent · ? à confirmer</p>
+  </div>
 
   <nav class="onglets" id="onglets" aria-label="Jours de la semaine"></nav>
 

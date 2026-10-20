@@ -24,7 +24,7 @@ HTML, CSS et JavaScript natifs : la seule dépendance est le script officiel `gr
 
 | Table | Rôle | Colonnes utilisées par le widget |
 | --- | --- | --- |
-| `Evenements` | import de l’Excel | `Jour` (Date), `Debut`, `Fin`, `Titre`, `Sous_titre`, `Type`, `Temps_fort`, `Lieu`, `Ville`, `Adresse`, `Public`, `Description`, `Lien` |
+| `Evenements` | import de l’Excel | `Jour` (Date), `Debut`, `Fin`, `Titre`, `Sous_titre`, `Type`, `Temps_fort`, `Lieu`, `Ville`, `Adresse`, `Public`, `Cibles` (facultative, voir « Publics visés »), `Description`, `Lien` |
 | `Annuaire` | une ligne par personne, **en lecture seule pour le widget** | `email`, `nom`, `prenom`, `nom_de_domaine`, `Etablissement` (texte) |
 | `Etablissement` | un logo par établissement | `Nom_complet`, `nom_de_domaine`, `Logo` (pièce jointe) |
 | `Participations` | **une ligne par présence**, c’est la table liée au widget | colonnes ci-dessous, créées par le widget |
@@ -76,6 +76,15 @@ Chacun lit toutes les présences, ne crée que des lignes à son e-mail, ne modi
 **Attribut utilisateur** (`acl`) : s’il n’est utilisé par aucune règle, le supprimer ; il fait recharger la page d’une personne dès que sa ligne de l’`Annuaire` change.
 
 Le reste (journaux de synchronisation, structure du document, masquer les e-mails, CSP, partage) est dans l’audit de sécurité, § 6 ; les règles ci-dessus sont reprises à l’identique de ses points B, D et E. Les tests (`grist-reel.test.js`) rejouent ces règles dans un vrai Grist.
+
+## Publics visés (filtre « Pour qui ? »)
+
+La colonne facultative `Cibles` de `Evenements` (type **Liste de choix**, choix : `Pédagogie`, `Recherche`, `Étudiants`, `Entreprises`) range chaque événement dans les publics des quatre plannings imprimés ; un événement peut en avoir plusieurs. Une colonne Texte avec des valeurs séparées par des virgules (`Pédagogie, Recherche`) est lue aussi. Les valeurs sont dans `data/build_xlsx.py` (table `CIBLES`, d’après les plannings PDF) et dans l’Excel.
+
+- Une rangée de bulles « Pour qui ? » au-dessus des jours, rien sur les fiches. On coche un ou plusieurs publics : un événement reste affiché s’il concerne l’un d’eux ; aucune bulle cochée, tout le planning. Un jour sans événement pour ce public affiche « Aucun événement pour ce public ce jour-là ».
+- Sans colonne `Cibles` (ou si elle est vide), la rangée n’apparaît pas : le widget reste comme avant. Un événement sans aucun public n’apparaît que quand aucune bulle n’est cochée.
+- Le choix est gardé sur l’appareil (`localStorage`, clé `semaine-innovation-2026:cibles`).
+- Noms et légendes : `CIBLES` dans `widget.js` ; couleurs des points : `.cible--code` dans `style.css`.
 
 ## Affichage
 

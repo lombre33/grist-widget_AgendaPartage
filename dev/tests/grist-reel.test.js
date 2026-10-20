@@ -23,8 +23,8 @@ describe('vrai Grist', { skip: disponible ? false : `Grist ne répond pas sur ${
   after(async () => { await navigateur.close(); await srv.fermer(); for (const d of docs) await supprimerDocument(d); });
 
   /** Un document neuf (structure et données d'Antoine), partagé en édition avec les autres personnes de l'Annuaire. */
-  async function nouveau({ regles = false, recommandees = false, logos = false, preparer = true } = {}) {
-    const r = await creerDocument(`Test ${new Date().toISOString()}`, { widget: `${srv.url}/index.html` });
+  async function nouveau({ regles = false, recommandees = false, logos = false, preparer = true, cibles = true } = {}) {
+    const r = await creerDocument(`Test ${new Date().toISOString()}`, { widget: `${srv.url}/index.html`, cibles });
     docs.push(r.doc);
     for (const email of r.emails.slice(1)) await partager(r.doc, email, 'editors');
     if (regles) await installerReglesAntoine(r.doc);
@@ -115,6 +115,32 @@ describe('vrai Grist', { skip: disponible ? false : `Grist ne répond pas sur ${
         assert.match(await widget.locator(SEL.etat).textContent(), /pas encore prêt à enregistrer/);
         assert.equal(await widget.locator('button[data-action="choisir"]').count(), 0);
       }
+    });
+  });
+
+  describe('publics visés (colonne Cibles, liste de choix)', () => {
+    test('la colonne est lue, une bulle par public, le filtre garde les bons événements et le choix reste au rechargement', async () => {
+      const doc = await nouveau();
+      const { page, widget } = await ouvrir(PROPRIO, doc);
+      assert.deepEqual(await widget.locator('.bulle').allInnerTexts(), ['Pédagogie', 'Recherche', 'Étudiants', 'Entreprises']);
+      await widget.locator('[data-cible="etudiants"]').evaluate((b) => b.click());   // le voile d'accueil de Grist peut intercepter un vrai clic
+      assert.equal(await widget.locator(SEL.evenement).count(), 7);
+      assert.equal(await carte(widget, 'Atelier Durable').count(), 1);
+      assert.equal(await carte(widget, 'Transmedia').count(), 0);
+      await page.reload();
+      const widget2 = await attendre(() => page.frames().find((f) => f.url().startsWith(srv.url)), { message: 'le widget ne s\'est pas rechargé' });
+      await widget2.waitForSelector(SEL.evenement, { timeout: 30000 });
+      assert.equal(await widget2.locator('[data-cible="etudiants"]').getAttribute('aria-pressed'), 'true');
+      assert.equal(await widget2.locator(SEL.evenement).count(), 7);
+      assert.deepEqual(page.erreurs, []);
+    });
+
+    test('sans colonne Cibles : pas de rangée de bulles, planning inchangé', async () => {
+      const doc = await nouveau({ cibles: false });
+      const { page, widget } = await ouvrir(PROPRIO, doc);
+      assert.equal(await widget.locator('#cibles').isVisible(), false);
+      assert.equal(await widget.locator(SEL.evenement).count(), 30);
+      assert.deepEqual(page.erreurs, []);
     });
   });
 
