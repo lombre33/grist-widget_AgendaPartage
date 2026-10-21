@@ -93,7 +93,7 @@ const CIBLES = [
 ];
 
 /* Numéro de version, affiché en bas de page : il permet de vérifier quelle version Grist a chargée (cache du navigateur). */
-const VERSION = '2026-10-20 · o';
+const VERSION = '2026-10-21 · p';
 
 const JOURS_SEMAINE = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
 const MOIS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
@@ -134,6 +134,7 @@ const etat = {
   demandesDisponibles: false,  // la table des demandes d’ajout existe et cette personne peut y écrire
   demande: null,               // sa demande déjà enregistrée : { nom, prenom, emailSaisi, etablissement, date }
   inscrit: false,              // la personne vient d’être ajoutée à l’Annuaire par le formulaire
+  inscriptionRefusee: false,   // les règles viennent de refuser la création de sa ligne dans l’Annuaire (sa demande seule est enregistrée)
   demandeEnCours: false,       // envoi de la demande en cours
   erreurDemande: '',
   brouillon: null,             // ce qu’elle a saisi (pour ne pas le perdre si l’envoi échoue)
@@ -988,7 +989,7 @@ function rendreEntete() {
   } else {
     zone.className = 'entete__moi moi moi--lecture';
     if (etat.acces) {   // la fenêtre d’explication peut être rouverte
-      zone.innerHTML = `<button type="button" class="moi__bouton" data-action="acces" data-focus="acces">${etat.acces === 'anonyme' ? 'Se connecter pour participer' : etat.inscrit ? 'Inscription enregistrée' : etat.demande ? 'Demande envoyée' : CONFIG.demandes.inscriptionAuto ? 'M’inscrire à l’annuaire' : 'Demander mon ajout'}</button>`;
+      zone.innerHTML = `<button type="button" class="moi__bouton" data-action="acces" data-focus="acces">${etat.acces === 'anonyme' ? 'Se connecter pour participer' : etat.inscrit ? 'Inscription enregistrée' : etat.demande ? (peutFinirInscription() ? 'Finir mon inscription' : 'Demande envoyée') : CONFIG.demandes.inscriptionAuto ? 'M’inscrire à l’annuaire' : 'Demander mon ajout'}</button>`;
     } else zone.textContent = 'Lecture seule';
   }
   const nb = etat.evenements.filter((e) => monStatut(e.id)).length;
@@ -1218,10 +1219,22 @@ function contenuDemande() {
   }
   if (etat.demande) {
     const quand = dateLongue(etat.demande.date);
+    const recap = `<dl class="acces__recap"><dt>Nom</dt><dd>${echapper(`${etat.demande.prenom} ${etat.demande.nom}`)}</dd><dt>E-mail</dt><dd>${echapper(etat.demande.emailSaisi)}</dd><dt>Établissement</dt><dd>${echapper(etat.demande.etablissement)}</dd></dl>`;
+    if (peutFinirInscription()) {
+      return `${connecte}
+        <h2 id="acces-titre">Votre demande est enregistrée</h2>
+        <p class="acces__intro">Vous n’êtes pas encore dans l’annuaire${quand ? ` (demande du ${quand})` : ''}. Terminez votre inscription ici : vous pourrez ensuite indiquer vos présences. Si elle n’est pas encore possible, l’organisateur vous ajoute dès que possible.</p>
+        ${recap}
+        ${etat.erreurDemande ? `<p class="acces__erreur" role="alert">${echapper(etat.erreurDemande)}</p>` : ''}
+        <div class="acces__actions">
+          <button type="button" class="acces__lien" data-action="fermer-acces">Plus tard</button>
+          <button type="button" class="acces__bouton" data-action="finir-inscription"${etat.demandeEnCours ? ' disabled' : ''}>${etat.demandeEnCours ? 'Inscription…' : 'Finir mon inscription'}</button>
+        </div>`;
+    }
     return `${connecte}
       <h2 id="acces-titre">Merci, votre demande est enregistrée</h2>
       <p class="acces__intro">Nous vous ajoutons à l’annuaire dès que possible${quand ? ` (demande du ${quand})` : ''}. Revenez ensuite sur cette page : vous pourrez indiquer vos présences.</p>
-      <dl class="acces__recap"><dt>Nom</dt><dd>${echapper(`${etat.demande.prenom} ${etat.demande.nom}`)}</dd><dt>E-mail</dt><dd>${echapper(etat.demande.emailSaisi)}</dd><dt>Établissement</dt><dd>${echapper(etat.demande.etablissement)}</dd></dl>
+      ${recap}
       ${fermer}`;
   }
   if (!etat.demandesDisponibles) {
@@ -1250,6 +1263,14 @@ function contenuDemande() {
 
 const domaineDe = (email) => texte(email).split('@').slice(1).join('@').toLowerCase();
 
+/** La ligne de l’Annuaire d’une personne qui s’inscrit : son e-mail de connexion, le domaine qui la relie à son établissement, ce qu’elle a saisi. */
+function ligneAnnuaire(valeurs) {
+  const a = CONFIG.annuaire;
+  return ['AddRecord', CONFIG.tables.annuaire, null, {
+    [a.nom]: valeurs.nom, [a.prenom]: valeurs.prenom, [a.email]: etat.emailConnexion, [a.domaine]: domaineDe(etat.emailConnexion), [a.etablissement]: valeurs.etablissement,
+  }];
+}
+
 /**
  * Enregistre la demande dans la table des demandes (l’e-mail de connexion et la date sont ajoutés par Grist) et, si `inscriptionAuto`,
  * ajoute la personne à l’Annuaire dans la même opération : le lien avec son établissement se fait par le domaine de son e-mail.
@@ -1258,7 +1279,6 @@ const domaineDe = (email) => texte(email).split('@').slice(1).join('@').toLowerC
  */
 async function envoyerDemande(valeurs) {
   const d = CONFIG.demandes;
-  const a = CONFIG.annuaire;
   etat.brouillon = valeurs;
   etat.demandeEnCours = true;
   etat.erreurDemande = '';
@@ -1266,9 +1286,7 @@ async function envoyerDemande(valeurs) {
   const demande = ['AddRecord', d.table, null, {
     [d.nom]: valeurs.nom, [d.prenom]: valeurs.prenom, [d.emailSaisi]: valeurs.emailSaisi, [d.etablissement]: valeurs.etablissement,
   }];
-  const inscription = ['AddRecord', CONFIG.tables.annuaire, null, {
-    [a.nom]: valeurs.nom, [a.prenom]: valeurs.prenom, [a.email]: etat.emailConnexion, [a.domaine]: domaineDe(etat.emailConnexion), [a.etablissement]: valeurs.etablissement,
-  }];
+  const inscription = ligneAnnuaire(valeurs);
   try {
     if (d.inscriptionAuto && etat.emailConnexion) {
       try {
@@ -1278,6 +1296,7 @@ async function envoyerDemande(valeurs) {
         if (!MOTIF_REFUS.test(texte(err && err.message))) throw err;
         console.warn('Ajout à l’Annuaire refusé par les règles d’accès : demande seule', err);
         await grist.docApi.applyUserActions([demande]);
+        etat.inscriptionRefusee = true;   // inutile de proposer « Finir mon inscription » tout de suite : elle vient d’être refusée
       }
     } else {
       await grist.docApi.applyUserActions([demande]);
@@ -1290,6 +1309,34 @@ async function envoyerDemande(valeurs) {
   etat.demandeEnCours = false;
   rendre();
   // Grist ne recharge pas le widget : on le recharge ici, juste après avoir montré la confirmation, pour que la personne soit reconnue.
+  if (etat.inscrit) setTimeout(() => location.reload(), 1500);
+}
+
+/** Faut-il proposer à la personne de finir elle-même son inscription ? Oui si sa demande est enregistrée et que rien ne vient de la refuser. */
+function peutFinirInscription() {
+  return Boolean(CONFIG.demandes.inscriptionAuto && etat.emailConnexion && !etat.inscriptionRefusee);
+}
+
+/**
+ * Sa demande est déjà enregistrée mais elle n’est pas dans l’Annuaire (les règles ne le permettaient pas encore, ou sa ligne a disparu) :
+ * on l’y ajoute avec ce qu’elle avait saisi, sans journaliser une deuxième demande. Si les règles refusent toujours, on le dit.
+ */
+async function terminerInscription() {
+  if (etat.demandeEnCours || !etat.demande || !etat.emailConnexion) return;
+  etat.demandeEnCours = true;
+  etat.erreurDemande = '';
+  rendre();
+  try {
+    await grist.docApi.applyUserActions([ligneAnnuaire(etat.demande)]);
+    etat.inscrit = true;
+  } catch (err) {
+    console.warn('Inscription à l’Annuaire impossible', err);
+    etat.erreurDemande = MOTIF_REFUS.test(texte(err && err.message))
+      ? 'L’inscription automatique n’est pas encore possible : l’organisateur vous ajoute à partir de votre demande.'
+      : 'Votre inscription n’a pas pu être enregistrée. Réessayez dans un instant ou prévenez l’organisateur.';
+  }
+  etat.demandeEnCours = false;
+  rendre();
   if (etat.inscrit) setTimeout(() => location.reload(), 1500);
 }
 
@@ -1336,6 +1383,9 @@ document.addEventListener('click', (ev) => {
     if (!ensemble.delete(id)) ensemble.add(id);
   } else if (cible.dataset.action === 'choisir') {
     choisir(Number(cible.dataset.evt), cible.dataset.valeur);
+    return;
+  } else if (cible.dataset.action === 'finir-inscription') {
+    terminerInscription();
     return;
   } else if (cible.dataset.action === 'acces' || cible.dataset.action === 'fermer-acces') {
     etat.accesOuvert = cible.dataset.action === 'acces';

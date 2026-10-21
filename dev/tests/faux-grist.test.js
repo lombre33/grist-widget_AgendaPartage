@@ -647,14 +647,44 @@ describe('accès : connexion (personne anonyme) et demande d\'ajout à l\'Annuai
     assert.equal(lots.filter((l) => l.some((a) => a[1] === 'Annuaire')).length, 1, 'une tentative dans l\'Annuaire');
     assert.deepEqual(lots[lots.length - 1].map((a) => a[1]), ['Demandes_Annuaire'], 'puis la demande seule');
     assert.equal(await page.locator('button[data-action="choisir"]').count(), 0);
+    assert.equal(await fenetre(page).getByRole('button', { name: 'Finir mon inscription' }).count(), 0, 'elle vient d\'être refusée : pas de bouton qui échouerait de la même façon');
+    assert.match(await page.locator('#moi button').innerText(), /Demande envoyée/);
   });
 
-  test('une demande déjà faite est rappelée, sans refaire le formulaire', async () => {
+  test('une demande déjà faite est rappelée, sans refaire le formulaire, avec un bouton pour finir l\'inscription', async () => {
     const page = await ouvrir({ requete: '?public&inconnu&demande-faite' });
     await fenetre(page).waitFor();
-    assert.match(await fenetre(page).locator('h2').innerText(), /votre demande est enregistrée/);
+    assert.match(await fenetre(page).locator('h2').innerText(), /Votre demande est enregistrée/);
     assert.match(await fenetre(page).innerText(), /demande du \d+ \S+/);
     assert.equal(await fenetre(page).locator('form').count(), 0);
+    assert.equal(await fenetre(page).getByRole('button', { name: 'Finir mon inscription' }).count(), 1);
+    assert.match(await page.locator('#moi button').innerText(), /Finir mon inscription/);
+  });
+
+  test('demande déjà faite, règles maintenant posées : « Finir mon inscription » ajoute la personne à l\'Annuaire sans refaire de demande, elle peut cocher', async () => {
+    const page = await ouvrir({ requete: '?public&inconnu&demande-faite' });
+    await fenetre(page).waitFor();
+    await fenetre(page).getByRole('button', { name: 'Finir mon inscription' }).click();
+    await attendre(async () => /Bienvenue, vous êtes dans l’annuaire/.test(await fenetre(page).locator('h2').innerText()), { message: 'la confirmation n\'apparaît pas' });
+    const lots = await actions(page);
+    assert.deepEqual(lots[lots.length - 1], [
+      ['AddRecord', 'Annuaire', null, { nom: 'Quelquun', prenom: 'Un', email: 'quelquun@exemple.org', nom_de_domaine: 'exemple.org', Etablissement: 'Association locale' }],
+    ], 'seule la ligne de l\'Annuaire est écrite : pas de deuxième demande');
+    await attendre(async () => (await page.locator(SEL.nom).innerText().catch(() => '')) === 'Un Quelquun', { delai: 15000, message: 'la personne n\'est pas reconnue après le rechargement' });
+    assert.equal(await page.locator('#acces[open]').count(), 0);
+    assert.ok(await page.locator('button[data-action="choisir"]').count() > 0, 'boutons de choix');
+  });
+
+  test('demande déjà faite, règles qui refusent encore : « Finir mon inscription » le dit, sans rien écrire de plus', async () => {
+    const page = await ouvrir({ requete: '?public&inconnu&demande-faite&sans-inscription' });
+    await fenetre(page).waitFor();
+    await fenetre(page).getByRole('button', { name: 'Finir mon inscription' }).click();
+    await attendre(async () => /pas encore possible/.test(await fenetre(page).innerText()), { message: 'pas de message' });
+    assert.match(await fenetre(page).innerText(), /l’organisateur vous ajoute/);
+    assert.equal(await page.locator('button[data-action="choisir"]').count(), 0);
+    assert.equal((await demandes(page)).filter((a) => a[3] && a[3].Nom).length, 0, 'aucune demande en double');
+    // on peut réessayer
+    assert.equal(await fenetre(page).getByRole('button', { name: 'Finir mon inscription' }).isEnabled(), true);
   });
 
   test('si l\'envoi échoue, on le dit et la saisie est conservée', async () => {
