@@ -40,12 +40,18 @@ async function connecter(contexte, utilisateur) {
  * docs.getgrist.com est de ce type, et une politique de sécurité sans 'unsafe-eval' l'empêcherait de s'exécuter
  * (le widget affichait alors « s'utilise dans Grist »). Avec { apiEval: false } on sert le script tel quel.
  */
-async function contexteNavigateur(navigateur, utilisateur, { apiEval = true, scriptApi, ...options } = {}) {
+async function contexteNavigateur(navigateur, utilisateur, { apiEval = true, scriptApi, formulaire = false, ...options } = {}) {
   const contexte = await navigateur.newContext({ viewport: { width: 1300, height: 900 }, ...options });
   if (utilisateur) await connecter(contexte, utilisateur);   // sans adresse : personne anonyme (document ouvert à tout le monde)
   const brut = scriptApi || await (await fetch(`${GRIST}/grist-plugin-api.js`)).text();
   const script = apiEval && !scriptApi ? `eval(${JSON.stringify(brut)});` : brut;   // { scriptApi } : texte à servir tel quel (par exemple le vrai script)
   await contexte.route('https://docs.getgrist.com/grist-plugin-api.js', (r) => r.fulfill({ contentType: 'text/javascript', body: script }));
+  if (formulaire) {   // { formulaire } : le réglage d'inscription « formulaire » (la fenêtre) à la place de « automatique »
+    await contexte.route(/\/widget\.js(\?.*)?$/, async (r) => {
+      const reponse = await r.fetch();
+      await r.fulfill({ response: reponse, body: (await reponse.text()).replace("inscription: 'automatique'", "inscription: 'formulaire'") });
+    });
+  }
   return contexte;
 }
 

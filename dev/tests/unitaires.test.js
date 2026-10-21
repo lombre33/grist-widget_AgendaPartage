@@ -377,3 +377,75 @@ describe('configuration', () => {
     assert.match(await page.locator('#version').innerText(), new RegExp(`^Version ${(await f('VERSION')).replace('·', '·')}`));
   });
 });
+
+describe('inscription automatique : nom, prénom et établissement', () => {
+  const noms = (compte, email = 'x@exemple.org') => f('nomsDepuisCompte', compte, email);
+
+  test('nomsDepuisCompte : « Prénom NOM », « NOM Prénom », « Prénom Nom », particules, prénoms composés', async () => {
+    assert.deepEqual(await noms('Jean-Pierre DUPONT'), { prenom: 'Jean-Pierre', nom: 'Dupont' });
+    assert.deepEqual(await noms('DUPONT Jean'), { prenom: 'Jean', nom: 'Dupont' });
+    assert.deepEqual(await noms('Jean Dupont'), { prenom: 'Jean', nom: 'Dupont' });
+    assert.deepEqual(await noms('Anne Marie Dupont'), { prenom: 'Anne Marie', nom: 'Dupont' });
+    assert.deepEqual(await noms('Marie de la Fontaine'), { prenom: 'Marie', nom: 'de la Fontaine' });
+    assert.deepEqual(await noms('Marie DE LA FONTAINE'), { prenom: 'Marie', nom: 'De la Fontaine' });
+    assert.deepEqual(await noms('Léa DUPONT-MARTIN'), { prenom: 'Léa', nom: 'Dupont-Martin' });
+    assert.deepEqual(await noms('JEAN DUPONT'), { prenom: 'Jean', nom: 'Dupont' });
+    assert.deepEqual(await noms('  Jean   Dupont '), { prenom: 'Jean', nom: 'Dupont' });
+    assert.deepEqual(await noms('Dupont'), { prenom: '', nom: 'Dupont' });
+    assert.deepEqual(await noms('Ève McDonald'), { prenom: 'Ève', nom: 'McDonald' });
+  });
+
+  test('nomsDepuisCompte : sans nom de compte, ou quand Grist n\'a mis que l\'adresse, on lit prenom.nom@domaine', async () => {
+    assert.deepEqual(await noms('', 'jean.dupont@u-bordeaux.fr'), { prenom: 'Jean', nom: 'Dupont' });
+    assert.deepEqual(await noms(null, 'jean-pierre.dupont@u-bordeaux.fr'), { prenom: 'Jean-Pierre', nom: 'Dupont' });
+    assert.deepEqual(await noms('jean.dupont', 'jean.dupont@u-bordeaux.fr'), { prenom: 'Jean', nom: 'Dupont' });
+    assert.deepEqual(await noms('jean.dupont@u-bordeaux.fr', 'jean.dupont@u-bordeaux.fr'), { prenom: 'Jean', nom: 'Dupont' });
+    assert.deepEqual(await noms('', 'jean-dupont@u-bordeaux.fr'), { prenom: 'Jean', nom: 'Dupont' });
+    assert.deepEqual(await noms('', 'marie.dupont2@u-bordeaux.fr'), { prenom: 'Marie', nom: 'Dupont' });
+    assert.deepEqual(await noms('', 'dupont@u-bordeaux.fr'), { prenom: '', nom: 'Dupont' });
+    assert.deepEqual(await noms('dupont', 'dupont@u-bordeaux.fr'), { prenom: '', nom: 'Dupont' });
+    assert.deepEqual(await noms('c.chatilli', 'c.chatilli@dr15.cnrs.fr'), { prenom: 'C.', nom: 'Chatilli' });
+    assert.deepEqual(await noms('Marie.DE.LA.FONTAINE', 'marie.de.la.fontaine@inrae.fr'), { prenom: 'Marie', nom: 'De la Fontaine' });
+    assert.deepEqual(await noms('', 'j.dupont@u-bordeaux.fr'), { prenom: 'J.', nom: 'Dupont' });
+  });
+
+  test('etablissementPourDomaine : le domaine exact, ou un sous-domaine d\'un établissement ; jamais un domaine qui ne fait que finir pareil', async () => {
+    assert.deepEqual(await f('etablissementPourDomaine', 'u-bordeaux.fr'), { nom: 'Université de Bordeaux', domaine: 'u-bordeaux.fr' });
+    assert.deepEqual(await f('etablissementPourDomaine', 'etu.u-bordeaux.fr'), { nom: 'Université de Bordeaux', domaine: 'u-bordeaux.fr' });
+    assert.deepEqual(await f('etablissementPourDomaine', 'BORDEAUX-INP.fr'), { nom: 'Bordeaux INP', domaine: 'bordeaux-inp.fr' });
+    // colonne alt_domain : texte à séparateurs (Bordeaux INP) ou liste de choix (INRAE)
+    assert.deepEqual(await f('etablissementPourDomaine', 'enseirb-matmeca.fr'), { nom: 'Bordeaux INP', domaine: 'enseirb-matmeca.fr' });
+    assert.deepEqual(await f('etablissementPourDomaine', 'etu.ensc.fr'), { nom: 'Bordeaux INP', domaine: 'ensc.fr' });
+    assert.deepEqual(await f('etablissementPourDomaine', 'irstea.fr'), { nom: 'INRAE', domaine: 'irstea.fr' });
+    assert.equal(await f('etablissementPourDomaine', 'autre-u-bordeaux.fr'), null);
+    assert.equal(await f('etablissementPourDomaine', 'exemple.org'), null);
+    assert.equal(await f('etablissementPourDomaine', 'fr'), null);
+    assert.equal(await f('etablissementPourDomaine', ''), null);
+  });
+
+  test('identiteDeConnexion : tout ce qu\'écrit l\'inscription automatique', async () => {
+    assert.deepEqual(await f('identiteDeConnexion', 'jean-pierre.dupont@etu.u-bordeaux.fr', 'Jean-Pierre DUPONT'),
+      { prenom: 'Jean-Pierre', nom: 'Dupont', etablissement: 'Université de Bordeaux', domaine: 'u-bordeaux.fr' });
+    assert.deepEqual(await f('identiteDeConnexion', 'sam.roux@asso.example', 'Sam Roux'),
+      { prenom: 'Sam', nom: 'Roux', etablissement: '', domaine: 'asso.example' });
+  });
+});
+
+describe('établissements à plusieurs noms de domaine (colonne alt_domain)', () => {
+  test('domainesEtablissement : texte à séparateurs, liste de choix, colonne vide ou absente', async () => {
+    assert.deepEqual(await f('domainesEtablissement', { nom_de_domaine: 'A-B.fr', alt_domain: 'x.fr, y.fr;z.fr\nw.fr' }), ['a-b.fr', 'x.fr', 'y.fr', 'z.fr', 'w.fr']);
+    assert.deepEqual(await f('domainesEtablissement', { nom_de_domaine: 'a.fr', alt_domain: ['L', 'x.fr', 'Y.fr'] }), ['a.fr', 'x.fr', 'y.fr']);
+    assert.deepEqual(await f('domainesEtablissement', { nom_de_domaine: 'a.fr', alt_domain: '' }), ['a.fr']);
+    assert.deepEqual(await f('domainesEtablissement', { nom_de_domaine: 'a.fr' }), ['a.fr']);
+    assert.deepEqual(await f('domainesEtablissement', { nom_de_domaine: 'a.fr', alt_domain: ['C'] }), ['a.fr']);
+    assert.deepEqual(await f('domainesEtablissement', { nom_de_domaine: 'a.fr', alt_domain: '@b.fr' }), ['a.fr', 'b.fr']);
+  });
+
+  test('une personne dont le domaine est un autre nom de domaine de l\'établissement a son logo et son établissement', async () => {
+    const logo = await f('trouverLogo', { domaine: 'enseirb-matmeca.fr', etablissement: '' });
+    assert.match(logo, /^data:image\/svg/);
+    assert.equal(logo, await f('trouverLogo', { domaine: 'bordeaux-inp.fr', etablissement: '' }));
+    assert.equal((await f('trouverEtablissement', { domaine: 'irstea.fr', etablissement: '' })).nom, 'INRAE');
+    assert.equal((await f('trouverEtablissement', { domaine: 'irstea.fr', etablissement: '' })).cle, (await f('trouverEtablissement', { domaine: 'inrae.fr', etablissement: '' })).cle, 'même groupe que le domaine principal');
+  });
+});

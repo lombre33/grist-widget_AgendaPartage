@@ -9,10 +9,14 @@
                     ?restreint      l'Annuaire ne montre que sa propre ligne (au lieu de masquer les e-mails des autres)
                     ?ambigu         tous les e-mails de l'Annuaire sont lisibles (cas réel) : la connexion seule doit suffire
                     ?anonyme        personne non connectée à Grist (e-mail de connexion vide, aucun e-mail lisible)
-                    ?inconnu        connecté avec une adresse absente de l'Annuaire
+                    ?inconnu        connecté avec une adresse absente de l'Annuaire (?inconnu=adresse pour en choisir une)
+                    ?nom=…          le nom du compte Grist de la personne (user.Name), lu par la formule « Nom_connexion » de Demandes_Annuaire
+                    ?inscription=formulaire  le mode d'inscription avec la fenêtre (le réglage de widget.js est « automatique »)
+                    ?sans-nom-connexion  la table Demandes_Annuaire n'a pas encore sa colonne Nom_connexion (le widget l'ajoute, sauf avec ?sans-droits)
                     ?public         document ouvert à tout le monde : l'Annuaire et l'écriture dans Participations sont fermés à qui n'y figure pas
                                     (à combiner avec ?anonyme ou ?inconnu) ; il reste la table des demandes d'ajout
                     ?sans-demandes  la table Demandes_Annuaire n'existe pas encore (le widget la crée) ; avec ?sans-droits il n'y arrive pas
+                    ?inscription-sans-effet  la création dans l'Annuaire est acceptée mais la personne n'y est pas reconnue ensuite (pour tester la garde contre la boucle)
                     ?sans-inscription  les règles d'accès refusent à une personne de créer sa ligne dans l'Annuaire (la demande seule est enregistrée)
                     ?demande-refusee  l'enregistrement d'une demande d'ajout échoue
                     ?demande-faite  la personne a déjà fait sa demande d'ajout
@@ -33,7 +37,7 @@
                     ?vide           démarrer sans aucune présence
                     ?foule          60 personnes de plus inscrites à l'événement 3 (liste longue, groupée par établissement)
 
-   Pour les tests : window.MOCK_ACTIONS liste les lots d'actions reçus par applyUserActions. Toute action sur
+   Pour les tests : window.MOCK_ACTIONS liste les lots d'actions reçus par applyUserActions (window.MOCK_HISTORIQUE : ceux de l'onglet, rechargements compris). Toute action sur
    l'Annuaire est refusée : le widget ne doit pas y écrire (l'attribut utilisateur « acl » recharge le document). */
 (function () {
   const params = new URLSearchParams(location.search);
@@ -44,11 +48,11 @@
       `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><rect width="40" height="40" rx="8" fill="${fond}"/>` +
       `<text x="20" y="26" font-family="Arial" font-size="15" font-weight="700" text-anchor="middle" fill="#fff">${lettres}</text></svg>`);
   const ETABLISSEMENTS = [
-    { id: 1, Nom_complet: 'Université de Bordeaux', Acronyme: 'UB', Logo: pastille('UB', '#a51140'), nom_de_domaine: 'u-bordeaux.fr' },
-    { id: 2, Nom_complet: 'Bordeaux INP', Acronyme: 'INP', Logo: pastille('INP', '#0b6e99'), nom_de_domaine: 'bordeaux-inp.fr' },
-    { id: 3, Nom_complet: 'Université Bordeaux Montaigne', Acronyme: 'BM', Logo: pastille('BM', '#2e7d32'), nom_de_domaine: 'u-bordeaux-montaigne.fr' },
-    { id: 4, Nom_complet: 'Sciences Po Bordeaux', Acronyme: 'SP', Logo: pastille('SP', '#e65100'), nom_de_domaine: 'sciencespo-bordeaux.fr' },
-    { id: 5, Nom_complet: 'INRAE', Acronyme: 'IN', Logo: pastille('IN', '#00695c'), nom_de_domaine: 'inrae.fr' },
+    { id: 1, Nom_complet: 'Université de Bordeaux', Acronyme: 'UB', Logo: pastille('UB', '#a51140'), nom_de_domaine: 'u-bordeaux.fr', alt_domain: '' },
+    { id: 2, Nom_complet: 'Bordeaux INP', Acronyme: 'INP', Logo: pastille('INP', '#0b6e99'), nom_de_domaine: 'bordeaux-inp.fr', alt_domain: 'enseirb-matmeca.fr; ensc.fr' },   // texte à séparateurs
+    { id: 3, Nom_complet: 'Université Bordeaux Montaigne', Acronyme: 'BM', Logo: pastille('BM', '#2e7d32'), nom_de_domaine: 'u-bordeaux-montaigne.fr', alt_domain: '' },
+    { id: 4, Nom_complet: 'Sciences Po Bordeaux', Acronyme: 'SP', Logo: pastille('SP', '#e65100'), nom_de_domaine: 'sciencespo-bordeaux.fr', alt_domain: '' },
+    { id: 5, Nom_complet: 'INRAE', Acronyme: 'IN', Logo: pastille('IN', '#00695c'), nom_de_domaine: 'inrae.fr', alt_domain: ['L', 'inra.fr', 'irstea.fr'] },   // liste de choix
   ];
 
   // --- Annuaire ------------------------------------------------------------------------------
@@ -76,7 +80,8 @@
   }
 
   // --- Participations : une ligne par présence + les lignes de connexion éphémères du widget -------
-  const emailConnecte = params.has('anonyme') ? '' : params.has('inconnu') ? 'quelquun@exemple.org' : parId(moiId).email;
+  const emailConnecte = params.has('anonyme') ? '' : params.has('inconnu') ? (params.get('inconnu') || 'quelquun@exemple.org') : parId(moiId).email;
+  const nomConnecte = params.get('nom') || '';   // user.Name
   const tout = !params.has('sans-colonnes') && !params.has('declencheur-casse');
   const colonnesParticipations = ['A', 'B', 'C'];   // colonnes par défaut d'une table Grist neuve
   const infosColonnes = {};
@@ -113,6 +118,8 @@
 
   // --- Demandes d'ajout à l'Annuaire : la personne ne voit que les siennes (comme les règles recommandées du README) ---------
   let demandeCreee = !params.has('sans-demandes');
+  const colonneAjoutee = () => { try { return sessionStorage.getItem('mock-colonne-nom') === '1'; } catch (e) { return false; } };   // survit à un rechargement, comme le document
+  let colonneNomConnexion = !params.has('sans-nom-connexion') || colonneAjoutee();
   let demandes = [];
   let prochaineDemande = 1;
   if (params.has('demande-faite')) demandes.push({ id: prochaineDemande++, Nom: 'Quelquun', Prenom: 'Un', Email_saisi: 'quelquun@exemple.org', Etablissement: 'Association locale', Email: emailConnecte, Date: 1792400000 });
@@ -133,6 +140,9 @@
   const enColonnes = (lignes, cols = Object.keys(lignes[0] || { id: 0 })) =>
     Object.fromEntries(cols.map((c) => [c, lignes.map((l) => l[c])]));
   window.MOCK_ACTIONS = [];
+  // Toutes les actions de l'onglet, rechargements compris (l'inscription automatique recharge le widget aussitôt)
+  const historique = (() => { try { return JSON.parse(sessionStorage.getItem('mock-historique') || '[]'); } catch (e) { return []; } })();
+  window.MOCK_HISTORIQUE = historique;
   window.MOCK_COLONNES = infosColonnes;   // définitions des colonnes créées dans Participations
   // La table Evenements (modifiable : le widget peut y créer et remplir la colonne « Cibles », comme dans Grist, en un seul lot)
   const tableEvenements = enColonnes(window.MOCK_EVENEMENTS);
@@ -167,7 +177,7 @@
         if (nom === 'Annuaire' && fermeAuxInconnus()) throw new Error('Blocked by table read access rules');
         if (nom === 'Demandes_Annuaire') {
           if (!demandeCreee) throw new Error(`Table inconnue : ${nom}`);
-          return enColonnes(demandes.filter((l) => emailConnecte && l.Email === emailConnecte), ['id', 'Nom', 'Prenom', 'Email_saisi', 'Etablissement', 'Email', 'Date']);
+          return enColonnes(demandes.filter((l) => emailConnecte && l.Email === emailConnecte), ['id', 'Nom', 'Prenom', 'Email_saisi', 'Etablissement', 'Email', ...(colonneNomConnexion ? ['Nom_connexion'] : []), 'Date']);
         }
         if (nom === 'Annuaire') return enColonnes(annuaireVisible(), ['id', 'prenom', 'nom', 'email', 'Etablissement', 'nom_de_domaine']);
         if (nom === 'Etablissement') return enColonnes(ETABLISSEMENTS);
@@ -177,6 +187,8 @@
       async applyUserActions(actions) {
         await attendre();
         window.MOCK_ACTIONS.push(JSON.parse(JSON.stringify(actions)));
+        historique.push(JSON.parse(JSON.stringify(actions)));
+        try { sessionStorage.setItem('mock-historique', JSON.stringify(historique)); } catch (e) { /* sans stockage : seul MOCK_ACTIONS sert */ }
         // Une opération est refusée en bloc : la demande n'est pas enregistrée si la création dans l'Annuaire est refusée
         if (params.has('sans-inscription') && actions.some((a) => a[1] === 'Annuaire')) throw new Error('Blocked by table create access rules');
         const retValues = [];
@@ -189,6 +201,7 @@
             if (v.email !== emailConnecte) throw new Error('Blocked by table create access rules');
             retValues[retValues.length - 1] = 99;
             // La ligne est dans l'Annuaire : au prochain chargement (le widget se recharge de lui-même), la personne y est reconnue
+            if (params.has('inscription-sans-effet')) continue;
             const u = new URL(location.href);
             u.searchParams.set('inscrit', JSON.stringify({ prenom: v.prenom, nom: v.nom, email: v.email, Etablissement: v.Etablissement, nom_de_domaine: v.nom_de_domaine }));
             history.replaceState(null, '', u.href);
@@ -198,12 +211,16 @@
             if (type === 'AddTable') {
               if (params.has('sans-droits')) throw new Error('Blocked by table structure access rules');
               demandeCreee = true;
+              colonneNomConnexion = true;
               retValues[retValues.length - 1] = { table_id: 'Demandes_Annuaire' };
+            } else if (type === 'AddColumn') {
+              if (params.has('sans-droits')) throw new Error('Blocked by table structure access rules');
+              if (args[0] === 'Nom_connexion') { colonneNomConnexion = true; try { sessionStorage.setItem('mock-colonne-nom', '1'); } catch (e) { /* sans stockage */ } }
             } else if (type === 'AddRecord') {
               const valeurs = args[1] || {};
               if (!demandeCreee) throw new Error(`Table inconnue : ${table}`);
               if (!emailConnecte || params.has('demande-refusee') && valeurs.Nom) throw new Error('Blocked by table create access rules');
-              const ligne = { id: prochaineDemande++, Email: emailConnecte, Date: Math.floor(Date.now() / 1000), ...valeurs };
+              const ligne = { id: prochaineDemande++, Email: emailConnecte, ...(colonneNomConnexion ? { Nom_connexion: nomConnecte } : {}), Date: Math.floor(Date.now() / 1000), ...valeurs };
               demandes.push(ligne);
               retValues[retValues.length - 1] = ligne.id;
             } else if (type === 'RemoveRecord') {

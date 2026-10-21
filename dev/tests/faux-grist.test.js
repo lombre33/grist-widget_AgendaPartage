@@ -473,7 +473,7 @@ describe('reconnaissance de la personne connectée', () => {
   });
 
   test('connectée mais absente de l\'Annuaire : on le dit, avec l\'adresse', async () => {
-    const page = await ouvrir({ requete: '?inconnu' });
+    const page = await ouvrir({ requete: '?inconnu&inscription=formulaire' });
     assert.match(await page.locator(SEL.etat).innerText(), /quelquun@exemple\.org\) n’est pas dans la table « Annuaire »/);
     assert.equal(await page.locator('button[data-action="choisir"]').count(), 0);
   });
@@ -606,7 +606,7 @@ describe('accès : connexion (personne anonyme) et demande d\'ajout à l\'Annuai
   });
 
   test('connectée mais absente de l\'Annuaire (document ouvert à tous) : le formulaire l\'inscrit, elle est reconnue et peut cocher', async () => {
-    const page = await ouvrir({ requete: '?public&inconnu' });
+    const page = await ouvrir({ requete: '?public&inconnu&inscription=formulaire' });
     await fenetre(page).waitFor();
     assert.match(await fenetre(page).innerText(), /avec quelquun@exemple\.org/i);
     assert.match(await fenetre(page).locator('h2').innerText(), /pas encore dans l’annuaire/);
@@ -636,7 +636,7 @@ describe('accès : connexion (personne anonyme) et demande d\'ajout à l\'Annuai
   });
 
   test('si les règles refusent la création dans l\'Annuaire, la demande seule est enregistrée et on le dit', async () => {
-    const page = await ouvrir({ requete: '?public&inconnu&sans-inscription' });
+    const page = await ouvrir({ requete: '?public&inconnu&sans-inscription&inscription=formulaire' });
     await fenetre(page).waitFor();
     await fenetre(page).locator('input[name="prenom"]').fill('Sam');
     await fenetre(page).locator('input[name="nom"]').fill('Roux');
@@ -652,7 +652,7 @@ describe('accès : connexion (personne anonyme) et demande d\'ajout à l\'Annuai
   });
 
   test('une demande déjà faite est rappelée, sans refaire le formulaire, avec un bouton pour finir l\'inscription', async () => {
-    const page = await ouvrir({ requete: '?public&inconnu&demande-faite' });
+    const page = await ouvrir({ requete: '?public&inconnu&demande-faite&inscription=formulaire' });
     await fenetre(page).waitFor();
     assert.match(await fenetre(page).locator('h2').innerText(), /Votre demande est enregistrée/);
     assert.match(await fenetre(page).innerText(), /demande du \d+ \S+/);
@@ -662,7 +662,7 @@ describe('accès : connexion (personne anonyme) et demande d\'ajout à l\'Annuai
   });
 
   test('demande déjà faite, règles maintenant posées : « Finir mon inscription » ajoute la personne à l\'Annuaire sans refaire de demande, elle peut cocher', async () => {
-    const page = await ouvrir({ requete: '?public&inconnu&demande-faite' });
+    const page = await ouvrir({ requete: '?public&inconnu&demande-faite&inscription=formulaire' });
     await fenetre(page).waitFor();
     await fenetre(page).getByRole('button', { name: 'Finir mon inscription' }).click();
     await attendre(async () => /Bienvenue, vous êtes dans l’annuaire/.test(await fenetre(page).locator('h2').innerText()), { message: 'la confirmation n\'apparaît pas' });
@@ -676,7 +676,7 @@ describe('accès : connexion (personne anonyme) et demande d\'ajout à l\'Annuai
   });
 
   test('demande déjà faite, règles qui refusent encore : « Finir mon inscription » le dit, sans rien écrire de plus', async () => {
-    const page = await ouvrir({ requete: '?public&inconnu&demande-faite&sans-inscription' });
+    const page = await ouvrir({ requete: '?public&inconnu&demande-faite&sans-inscription&inscription=formulaire' });
     await fenetre(page).waitFor();
     await fenetre(page).getByRole('button', { name: 'Finir mon inscription' }).click();
     await attendre(async () => /pas encore possible/.test(await fenetre(page).innerText()), { message: 'pas de message' });
@@ -688,7 +688,7 @@ describe('accès : connexion (personne anonyme) et demande d\'ajout à l\'Annuai
   });
 
   test('si l\'envoi échoue, on le dit et la saisie est conservée', async () => {
-    const page = await ouvrir({ requete: '?public&inconnu&demande-refusee' });
+    const page = await ouvrir({ requete: '?public&inconnu&demande-refusee&inscription=formulaire' });
     await fenetre(page).waitFor();
     await fenetre(page).locator('input[name="prenom"]').fill('Sam');
     await fenetre(page).locator('input[name="nom"]').fill('Roux');
@@ -700,21 +700,21 @@ describe('accès : connexion (personne anonyme) et demande d\'ajout à l\'Annuai
   });
 
   test('document où l\'Annuaire se lit (réglage actuel) : une personne connectée absente de l\'Annuaire a aussi le formulaire', async () => {
-    const page = await ouvrir({ requete: '?inconnu' });
+    const page = await ouvrir({ requete: '?inconnu&inscription=formulaire' });
     await fenetre(page).waitFor();
     assert.equal(await fenetre(page).locator('form').count(), 1);
     assert.match(await page.locator(SEL.etat).innerText(), /quelquun@exemple\.org\) n’est pas dans la table « Annuaire »/);
   });
 
   test('la table des demandes manquante est créée par le widget ; sans droit de structure, pas de formulaire mais un message', async () => {
-    let page = await ouvrir({ requete: '?inconnu&sans-demandes' });
+    let page = await ouvrir({ requete: '?inconnu&sans-demandes&inscription=formulaire' });
     await fenetre(page).waitFor();
     const creation = (await demandes(page)).find((a) => a[0] === 'AddTable');
     assert.deepEqual(creation[2].map((c) => c.id), ['Nom', 'Prenom', 'Email_saisi', 'Etablissement']);
     const colonnes = (await demandes(page)).filter((a) => a[0] === 'AddColumn');
-    assert.deepEqual(colonnes.map((a) => [a[2], a[3].formula, a[3].recalcWhen]), [['Email', 'user.Email', 0], ['Date', 'NOW()', 0]]);
+    assert.deepEqual(colonnes.map((a) => [a[2], a[3].formula, a[3].recalcWhen]), [['Email', 'user.Email', 0], ['Nom_connexion', 'user.Name', 0], ['Date', 'NOW()', 0]]);
     assert.equal(await fenetre(page).locator('form').count(), 1);
-    page = await ouvrir({ requete: '?inconnu&sans-demandes&sans-droits' });
+    page = await ouvrir({ requete: '?inconnu&sans-demandes&sans-droits&inscription=formulaire' });
     await fenetre(page).waitFor();
     assert.equal(await fenetre(page).locator('form').count(), 0);
     assert.match(await fenetre(page).innerText(), /Demandez à l’organisateur de vous ajouter/);
@@ -728,3 +728,111 @@ describe('accès : connexion (personne anonyme) et demande d\'ajout à l\'Annuai
     assert.equal(await page.locator(SEL.nom).innerText(), 'Camille Martin');
   });
 });
+
+describe('inscription automatique (sans fenêtre) : e-mail, nom et établissement tirés de la connexion', () => {
+  const historique = (page) => page.evaluate(() => window.MOCK_HISTORIQUE);   // les actions de l'onglet, rechargement compris
+  const demandes = (page) => historique(page).then((lots) => lots.flat().filter((a) => a[1] === 'Demandes_Annuaire'));
+  const lotAnnuaire = (page) => historique(page).then((lots) => lots.filter((l) => l.some((a) => a[1] === 'Annuaire')));
+  const jean = '?public&inconnu=jean-pierre.dupont@etu.u-bordeaux.fr&nom=Jean-Pierre%20DUPONT';
+
+  test('connectée, absente de l\'Annuaire : aucune fenêtre, elle est inscrite avec son nom Grist et l\'établissement de son domaine, reconnue puis elle coche', async () => {
+    const page = await ouvrir({ requete: jean });
+    await attendre(async () => (await lotAnnuaire(page)).length === 1, { message: 'l\'inscription n\'est pas partie' });
+    assert.equal(await page.locator('#acces[open]').count(), 0, 'aucune fenêtre');
+    // une seule opération : la trace dans le journal, puis la ligne de l'Annuaire (domaine et nom de l'établissement trouvés par le sous-domaine)
+    assert.deepEqual((await lotAnnuaire(page))[0], [
+      ['AddRecord', 'Demandes_Annuaire', null, { Nom: 'Dupont', Prenom: 'Jean-Pierre', Email_saisi: 'jean-pierre.dupont@etu.u-bordeaux.fr', Etablissement: 'Université de Bordeaux' }],
+      ['AddRecord', 'Annuaire', null, { nom: 'Dupont', prenom: 'Jean-Pierre', email: 'jean-pierre.dupont@etu.u-bordeaux.fr', nom_de_domaine: 'u-bordeaux.fr', Etablissement: 'Université de Bordeaux' }],
+    ]);
+    await attendre(async () => (await page.locator(SEL.nom).innerText().catch(() => '')) === 'Jean-Pierre Dupont', { delai: 15000, message: 'la personne n\'est pas reconnue après le rechargement' });
+    assert.equal(await page.locator('#acces[open]').count(), 0);
+    assert.ok(await page.locator('button[data-action="choisir"]').count() > 0, 'boutons de choix');
+    assert.equal((await lotAnnuaire(page)).length, 1, 'une seule inscription, rien n\'est réécrit après le rechargement');
+    aucuneErreur(page);
+  });
+
+  test('l\'inscription se fait pendant le chargement : la personne arrive reconnue, sans bandeau ni fenêtre ni attente', async () => {
+    const page = await ouvrir({ requete: jean });
+    assert.equal(await page.locator(SEL.nom).innerText(), 'Jean-Pierre Dupont', 'reconnue dès le premier affichage visible');
+    assert.equal(await page.locator('#etat').innerText(), '', 'aucun message');
+    assert.equal(await page.locator('#acces[open]').count(), 0);
+    assert.equal((await lotAnnuaire(page)).length, 1);
+  });
+
+  test('domaine inconnu : inscrite quand même, sans établissement, le domaine est gardé', async () => {
+    const page = await ouvrir({ requete: '?public&inconnu=sam.roux@asso.example&nom=Sam%20Roux' });
+    await attendre(async () => (await lotAnnuaire(page)).length === 1);
+    assert.deepEqual((await lotAnnuaire(page))[0][1], ['AddRecord', 'Annuaire', null, { nom: 'Roux', prenom: 'Sam', email: 'sam.roux@asso.example', nom_de_domaine: 'asso.example', Etablissement: '' }]);
+  });
+
+  test('autre nom de domaine d\'un établissement (colonne alt_domain) : l\'établissement est trouvé', async () => {
+    const page = await ouvrir({ requete: '?public&inconnu=nina.petit@enseirb-matmeca.fr&nom=Nina%20Petit' });
+    await attendre(async () => (await lotAnnuaire(page)).length === 1);
+    assert.deepEqual((await lotAnnuaire(page))[0][1][3], { nom: 'Petit', prenom: 'Nina', email: 'nina.petit@enseirb-matmeca.fr', nom_de_domaine: 'enseirb-matmeca.fr', Etablissement: 'Bordeaux INP' });
+    await attendre(async () => (await page.locator(SEL.nom).innerText().catch(() => '')) === 'Nina Petit', { delai: 15000 });
+    assert.match(await page.locator('#moi img.avatar').getAttribute('src'), /^data:image\/svg/, 'le logo de Bordeaux INP, trouvé par l\'autre nom de domaine');
+  });
+
+  test('sans nom de compte : le prénom et le nom sont lus dans l\'adresse', async () => {
+    const page = await ouvrir({ requete: '?public&inconnu=alex.bernard@inrae.fr' });
+    await attendre(async () => (await lotAnnuaire(page)).length === 1);
+    assert.deepEqual((await lotAnnuaire(page))[0][1][3], { nom: 'Bernard', prenom: 'Alex', email: 'alex.bernard@inrae.fr', nom_de_domaine: 'inrae.fr', Etablissement: 'INRAE' });
+  });
+
+  test('les règles refusent la création dans l\'Annuaire : la trace seule est enregistrée, on le dit, et elle n\'est pas refaite à la visite suivante', async () => {
+    let page = await ouvrir({ requete: `${jean}&sans-inscription` });
+    await attendre(async () => /Votre demande est enregistrée/.test(await page.locator(SEL.etat).innerText()), { message: 'pas de message' });
+    assert.equal(await page.locator('#acces[open]').count(), 0, 'aucune fenêtre');
+    assert.match(await page.locator('#moi').innerText(), /Demande enregistrée/);
+    assert.equal(await page.locator('button[data-action="choisir"]').count(), 0);
+    const lots = await actions(page);
+    assert.deepEqual(lots[lots.length - 1].map((a) => a[1]), ['Demandes_Annuaire'], 'la trace seule');
+    assert.equal((await demandes(page)).filter((a) => a[3] && a[3].Nom).length, 2, 'une tentative groupée, puis la trace');
+    // visite suivante, la demande existe déjà : on retente l'Annuaire sans refaire de trace
+    page = await ouvrir({ requete: '?public&inconnu&demande-faite&sans-inscription' });
+    await attendre(async () => /Votre demande est enregistrée/.test(await page.locator(SEL.etat).innerText()), { message: 'pas de message' });
+    assert.equal((await demandes(page)).filter((a) => a[3] && a[3].Nom).length, 0, 'aucune nouvelle trace');
+  });
+
+  test('demande déjà enregistrée et règle posée depuis : la personne est inscrite avec ce qu\'elle avait saisi, sans deuxième trace', async () => {
+    const page = await ouvrir({ requete: '?public&inconnu&demande-faite' });
+    await attendre(async () => (await lotAnnuaire(page)).length === 1);
+    assert.deepEqual((await lotAnnuaire(page))[0], [['AddRecord', 'Annuaire', null, { nom: 'Quelquun', prenom: 'Un', email: 'quelquun@exemple.org', nom_de_domaine: 'exemple.org', Etablissement: 'Association locale' }]]);
+    await attendre(async () => (await page.locator(SEL.nom).innerText().catch(() => '')) === 'Un Quelquun', { delai: 15000 });
+  });
+
+  test('table des demandes d\'une ancienne version (sans la colonne du nom) : le widget l\'ajoute et lit le nom ; sans droit de structure, le nom vient de l\'adresse', async () => {
+    let page = await ouvrir({ requete: '?public&inconnu=sam.roux@asso.example&nom=Sam%20ROUX&sans-nom-connexion' });
+    await attendre(async () => (await lotAnnuaire(page)).length === 1);
+    assert.deepEqual((await demandes(page)).filter((a) => a[0] === 'AddColumn').map((a) => [a[2], a[3].formula, a[3].recalcWhen]), [['Nom_connexion', 'user.Name', 0]]);
+    assert.deepEqual((await lotAnnuaire(page))[0][1][3], { nom: 'Roux', prenom: 'Sam', email: 'sam.roux@asso.example', nom_de_domaine: 'asso.example', Etablissement: '' });
+    page = await ouvrir({ requete: '?public&inconnu=yan.lopez@asso.example&nom=Y%20LOPEZ&sans-nom-connexion&sans-droits' });
+    await attendre(async () => (await lotAnnuaire(page)).length === 1);
+    assert.deepEqual((await lotAnnuaire(page))[0][1][3].prenom, 'Yan', 'le nom de compte est inconnu : l\'adresse sert');
+  });
+
+  test('garde contre la boucle : inscrite sans être reconnue après le rechargement, la personne n\'est pas inscrite une seconde fois et on le dit', async () => {
+    const page = await ouvrir({ requete: `${jean}&inscription-sans-effet` });
+    await attendre(async () => (await lotAnnuaire(page)).length === 1);
+    await attendre(async () => /n’a pas pu se faire automatiquement/.test(await page.locator(SEL.etat).innerText().catch(() => '')), { delai: 15000, message: 'pas de message après le rechargement' });
+    assert.equal((await lotAnnuaire(page)).length, 1, 'une seule inscription : rien n\'est réécrit après le rechargement');
+  });
+
+  test('une personne anonyme, une personne reconnue : rien n\'est écrit dans l\'Annuaire ni dans le journal', async () => {
+    let page = await ouvrir({ requete: '?public&anonyme' });
+    await pause(600);
+    assert.equal((await lotAnnuaire(page)).length, 0);
+    page = await ouvrir();
+    await pause(600);
+    assert.deepEqual((await actions(page)).flat().filter((a) => ['Annuaire', 'Demandes_Annuaire'].includes(a[1])), []);
+  });
+
+  test('mode « formulaire » : la fenêtre revient, l\'inscription automatique ne se déclenche pas', async () => {
+    const page = await ouvrir({ requete: `${jean}&inscription=formulaire` });
+    await page.locator('#acces[open]').waitFor();
+    await pause(600);
+    assert.equal((await lotAnnuaire(page)).length, 0);
+    assert.equal(await page.locator('#acces form').count(), 1);
+  });
+});
+

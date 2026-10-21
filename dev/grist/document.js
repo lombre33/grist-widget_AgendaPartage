@@ -7,7 +7,7 @@ const { api, appliquer, session, GRIST, WIDGET, PROPRIETAIRE } = require('./lib'
 
 const ETABLISSEMENTS = [
   ['Université de Bordeaux', 'UB', 'u-bordeaux.fr'],
-  ['Bordeaux INP', 'INP', 'bordeaux-inp.fr'],
+  ['Bordeaux INP', 'INP', 'bordeaux-inp.fr', 'enseirb-matmeca.fr; ensc.fr'],   // le quatrième : autres noms de domaine (colonne alt_domain)
   ['Université Bordeaux Montaigne', 'BM', 'u-bordeaux-montaigne.fr'],
   ['Sciences Po Bordeaux', 'SP', 'sciencespo-bordeaux.fr'],
   ['INRAE', 'IN', 'inrae.fr'],
@@ -55,7 +55,7 @@ async function creerDocument(nom = 'Semaine de l’innovation (test)', { widget 
   const cles = ['Debut', 'Fin', 'Titre', 'Sous_titre', 'Type', 'Temps_fort', 'Lieu', 'Ville', 'Adresse', 'Public', 'Description', 'Lien'];
   await appliquer(PROPRIETAIRE, doc, [
     ['AddTable', 'Annuaire', colonnes(['nom', 'prenom', 'Etablissement', 'email', 'Fonction', 'nom_de_domaine', 'email_affiche'])],
-    ['AddTable', 'Etablissement', [...colonnes(['Nom_complet', 'Acronyme', 'nom_de_domaine']), { id: 'Logo', type: 'Attachments', isFormula: false }]],
+    ['AddTable', 'Etablissement', [...colonnes(['Nom_complet', 'Acronyme', 'nom_de_domaine', 'alt_domain']), { id: 'Logo', type: 'Attachments', isFormula: false }]],
     ['AddTable', 'Evenements', [{ id: 'Jour', type: 'Date', isFormula: false }, ...colonnes(cles),
       ...(cibles ? [{ id: 'Cibles', type: 'ChoiceList', isFormula: false, widgetOptions: JSON.stringify({ choices: choixCibles }) }] : [])]],
     // Comme dans le vrai document : une table neuve, avec ses trois colonnes A, B, C par défaut
@@ -63,7 +63,7 @@ async function creerDocument(nom = 'Semaine de l’innovation (test)', { widget 
   ]);
   await appliquer(PROPRIETAIRE, doc, [
     ['BulkAddRecord', 'Etablissement', ETABLISSEMENTS.map(() => null), {
-      Nom_complet: ETABLISSEMENTS.map((e) => e[0]), Acronyme: ETABLISSEMENTS.map((e) => e[1]), nom_de_domaine: ETABLISSEMENTS.map((e) => e[2]) }],
+      Nom_complet: ETABLISSEMENTS.map((e) => e[0]), Acronyme: ETABLISSEMENTS.map((e) => e[1]), nom_de_domaine: ETABLISSEMENTS.map((e) => e[2]), alt_domain: ETABLISSEMENTS.map((e) => e[3] || '') }],
     ['BulkAddRecord', 'Annuaire', PERSONNES.map(() => null), {
       prenom: PERSONNES.map((p) => p[0]), nom: PERSONNES.map((p) => p[1]), nom_de_domaine: PERSONNES.map((p) => p[2]),
       Etablissement: PERSONNES.map((p) => p[3]), email: PERSONNES.map(emailDe), email_affiche: PERSONNES.map(emailDe), Fonction: PERSONNES.map(() => 'Chargé·e de mission') }],

@@ -51,6 +51,7 @@ const CONFIG = {
     nom: 'Nom_complet',
     acronyme: 'Acronyme',                // initiales affichées quand l’établissement n’a pas de logo
     domaine: 'nom_de_domaine',
+    domainesAlt: 'alt_domain',           // autres noms de domaine du même établissement (texte séparé par des virgules, espaces ou retours à la ligne, ou liste de choix)
     logo: 'Logo',                        // colonne Pièces jointes, ou lien web (https://…)
   },
   // Table des demandes d’ajout à l’Annuaire : une personne connectée mais absente de l’Annuaire y laisse ses coordonnées.
@@ -59,9 +60,15 @@ const CONFIG = {
     table: 'Demandes_Annuaire',
     nom: 'Nom', prenom: 'Prenom', emailSaisi: 'Email_saisi', etablissement: 'Etablissement',
     email: 'Email',                      // formule « à la création » : user.Email, l’e-mail de connexion
+    nomConnexion: 'Nom_connexion',       // formule « à la création » : user.Name, le nom du compte Grist
     date: 'Date',                        // formule « à la création » : NOW()
-    // Vrai : le formulaire ajoute aussi la personne à l’Annuaire (avec son e-mail de connexion), sans validation : elle peut cocher aussitôt.
-    // La demande reste dans la table ci-dessus, comme journal. Si les règles d’accès ne laissent pas la personne créer sa ligne, seule la demande est enregistrée.
+    // Comment une personne connectée mais absente de l’Annuaire y entre, sans validation :
+    //  'automatique' : pas de fenêtre. Le widget l’inscrit tout seul avec son e-mail de connexion, son nom Grist (user.Name) et l’établissement
+    //                  dont le nom de domaine est celui de son e-mail ; une ligne de la table ci-dessus garde la trace.
+    //  'formulaire'  : une fenêtre lui demande nom, prénom, e-mail et établissement (voir contenuDemande).
+    // Dans les deux cas, si les règles d’accès ne laissent pas la personne créer sa ligne, seule sa demande est enregistrée.
+    inscription: 'automatique',
+    // Mode « formulaire » : vrai, le formulaire ajoute aussi la personne à l’Annuaire ; faux, il enregistre seulement la demande.
     inscriptionAuto: true,
   },
   // Fenêtre « Connectez-vous pour participer » : le service de connexion et le service que les gens connaissent déjà.
@@ -135,6 +142,8 @@ const etat = {
   demande: null,               // sa demande déjà enregistrée : { nom, prenom, emailSaisi, etablissement, date }
   inscrit: false,              // la personne vient d’être ajoutée à l’Annuaire par le formulaire
   inscriptionRefusee: false,   // les règles viennent de refuser la création de sa ligne dans l’Annuaire (sa demande seule est enregistrée)
+  inscription: '',             // inscription automatique : '' (pas commencée), 'encours', 'faite', 'refusee' ou 'echec'
+  nomConnexion: null,          // nom du compte Grist (user.Name), lu avec l’e-mail de connexion ; null tant qu’il n’a pas été lu
   demandeEnCours: false,       // envoi de la demande en cours
   erreurDemande: '',
   brouillon: null,             // ce qu’elle a saisi (pour ne pas le perdre si l’envoi échoue)
@@ -337,6 +346,14 @@ async function preparerCibles() {
   }
 }
 
+/** Les noms de domaine d’un établissement : `nom_de_domaine` et `alt_domain` (texte à séparateurs ou liste de choix), en minuscules sans accents. */
+function domainesEtablissement(ligne) {
+  const e = CONFIG.etablissements;
+  const valeurs = (v) => (Array.isArray(v) ? (v[0] === 'L' ? v.slice(1) : []) : texte(v).split(/[\s,;|]+/));
+  return [e.domaine, e.domainesAlt].filter(Boolean).flatMap((colonne) => valeurs(ligne[colonne]))
+    .map((d) => sansAccent(d).replace(/^@/, '')).filter((d) => d.includes('.'));
+}
+
 /** Logos des établissements, indexés par nom de domaine puis par nom (une seule normalisation par ligne). */
 async function chargerEtablissements() {
   try {
@@ -348,6 +365,7 @@ async function chargerEtablissements() {
       const nom = sansAccent(l[e.nom]);
       const fiche = { cle: domaine || nom, nom: texte(l[e.nom]), acronyme: texte(l[e.acronyme]), logo: l[e.logo] };
       if (domaine && !etat.logos.parDomaine.has(domaine)) etat.logos.parDomaine.set(domaine, fiche);
+      for (const autre of domainesEtablissement(l)) if (!etat.logos.parDomaine.has(autre)) etat.logos.parDomaine.set(autre, fiche);   // les autres noms de domaine mènent à la même fiche
       if (nom && !etat.logos.parNom.has(nom)) etat.logos.parNom.set(nom, fiche);
     }
   } catch (err) {
@@ -988,7 +1006,9 @@ function rendreEntete() {
     zone.innerHTML = `${rendreAvatar({ ...etat.moi, statut: 'sur' })}<span>${echapper(nomComplet(etat.moi) || 'Connecté(e)')}</span>`;
   } else {
     zone.className = 'entete__moi moi moi--lecture';
-    if (etat.acces) {   // la fenêtre d’explication peut être rouverte
+    if (etat.acces === 'hors_annuaire' && inscriptionSansFenetre()) {   // inscription automatique : pas de fenêtre à rouvrir, juste l’état
+      zone.textContent = { faite: 'Bienvenue !', refusee: 'Demande enregistrée', echec: 'Inscription impossible' }[etat.inscription] || 'Inscription en cours…';
+    } else if (etat.acces) {   // la fenêtre d’explication peut être rouverte
       zone.innerHTML = `<button type="button" class="moi__bouton" data-action="acces" data-focus="acces">${etat.acces === 'anonyme' ? 'Se connecter pour participer' : etat.inscrit ? 'Inscription enregistrée' : etat.demande ? (peutFinirInscription() ? 'Finir mon inscription' : 'Demande envoyée') : CONFIG.demandes.inscriptionAuto ? 'M’inscrire à l’annuaire' : 'Demander mon ajout'}</button>`;
     } else zone.textContent = 'Lecture seule';
   }
@@ -1035,7 +1055,9 @@ function rendrePlanning(jours) {
 function rendre() {
   if (!etat.pret) return;   // le premier affichage attend la fin du premier chargement
   const technique = etat.erreurColonnes || etat.erreur || (!etat.moi && !etat.inscrit && etat.messageMoi) || '';
-  if (technique) {
+  const inscription = !(etat.erreurColonnes || etat.erreur) && messageInscription();
+  if (inscription) afficherMessage(inscription.texte, inscription.erreur);
+  else if (technique) {
     const { texte: simple, detail } = messageSimple(technique);
     afficherMessage(simple, Boolean(etat.erreurColonnes || etat.erreur), detail);
   } else if (!etat.evenements.length) afficherMessage('Aucun événement à afficher.');
@@ -1071,11 +1093,22 @@ function rendre() {
 // Les messages d’erreur de Grist quand une règle d’accès refuse une lecture ou une écriture.
 const MOTIF_REFUS = /blocked by|access rules|denied|forbidden|permission|\b403\b/i;
 
+/** Ajoute à la table des demandes la colonne du nom du compte Grist (seule une personne qui peut modifier la structure y arrive : sinon, le nom est tiré de l’e-mail). */
+async function ajouterColonneNom() {
+  const d = CONFIG.demandes;
+  try {
+    await grist.docApi.applyUserActions([['AddColumn', d.table, d.nomConnexion, { type: 'Text', isFormula: false, formula: 'user.Name', recalcWhen: 0, label: 'Nom du compte Grist' }]]);
+  } catch (err) {
+    console.warn(`Colonne « ${d.nomConnexion} » non ajoutée à « ${d.table} »`, err);
+  }
+}
+
 /** Crée la table des demandes si elle n’existe pas encore (seule une personne qui peut modifier la structure y arrive). */
 async function preparerDemandes() {
   const d = CONFIG.demandes;
   try {
-    await grist.docApi.fetchTable(d.table);
+    const lue = await grist.docApi.fetchTable(d.table);
+    if (!(d.nomConnexion in lue)) await ajouterColonneNom();   // table créée par une version plus ancienne
     return;
   } catch (err) {
     if (MOTIF_REFUS.test(texte(err && err.message))) return;   // elle existe, mais cette personne ne peut pas la lire
@@ -1084,6 +1117,7 @@ async function preparerDemandes() {
     const { retValues = [] } = (await grist.docApi.applyUserActions([
       ['AddTable', d.table, [d.nom, d.prenom, d.emailSaisi, d.etablissement].map((id) => ({ id, type: 'Text', isFormula: false }))],
       ['AddColumn', d.table, d.email, { type: 'Text', isFormula: false, formula: 'user.Email', recalcWhen: 0, label: 'E-mail de connexion' }],
+      ['AddColumn', d.table, d.nomConnexion, { type: 'Text', isFormula: false, formula: 'user.Name', recalcWhen: 0, label: 'Nom du compte Grist' }],
       ['AddColumn', d.table, d.date, { type: 'DateTime:Europe/Paris', isFormula: false, formula: 'NOW()', recalcWhen: 0, label: 'Date de la demande' }],
     ])) || {};
     const creee = retValues[0] && retValues[0].table_id;
@@ -1097,8 +1131,8 @@ async function preparerDemandes() {
 }
 
 /**
- * Cette personne est-elle connectée à Grist ? Une ligne éphémère dans la table des demandes donne son e-mail de connexion
- * (formule « à la création ») ; Grist la refuse aux personnes anonymes. La ligne est supprimée aussitôt.
+ * Cette personne est-elle connectée à Grist ? Une ligne éphémère dans la table des demandes donne son e-mail de connexion et le nom
+ * de son compte (formules « à la création ») ; Grist la refuse aux personnes anonymes. La ligne est supprimée aussitôt.
  */
 async function sonderConnexion() {
   const d = CONFIG.demandes;
@@ -1107,7 +1141,7 @@ async function sonderConnexion() {
     id = (await grist.docApi.applyUserActions([['AddRecord', d.table, null, {}]])).retValues[0];
     const lues = await grist.docApi.fetchTable(d.table);
     const i = lues.id.indexOf(id);
-    return i < 0 ? '' : texte(lues[d.email][i]);
+    return i < 0 ? { email: '', nom: '' } : { email: texte(lues[d.email][i]), nom: d.nomConnexion in lues ? texte(lues[d.nomConnexion][i]) : '' };
   } finally {
     if (id != null) await grist.docApi.applyUserActions([['RemoveRecord', d.table, id]]).catch((err) => console.warn('Ligne de sondage non supprimée', err));
   }
@@ -1134,7 +1168,11 @@ async function verifierAcces() {
   if (etat.moi) return;
   try {
     if (etat.connexion && etat.connexion.email && !etat.erreurAnnuaire) etat.emailConnexion = etat.connexion.email;   // l’Annuaire se lit : c’est son adresse qui y manque
-    else if (etat.annuaireRefuse) etat.emailConnexion = await sonderConnexion();                                      // l’Annuaire lui est fermé : est-elle connectée ?
+    else if (etat.annuaireRefuse) {                                                                                    // l’Annuaire lui est fermé : est-elle connectée ?
+      const sonde = await sonderConnexion();
+      etat.emailConnexion = sonde.email;
+      etat.nomConnexion = sonde.nom;
+    }
   } catch (err) {
     if (MOTIF_REFUS.test(texte(err && err.message))) etat.acces = 'anonyme';
     else console.warn('Sondage de la connexion impossible', err);
@@ -1264,11 +1302,92 @@ function contenuDemande() {
 const domaineDe = (email) => texte(email).split('@').slice(1).join('@').toLowerCase();
 
 /** La ligne de l’Annuaire d’une personne qui s’inscrit : son e-mail de connexion, le domaine qui la relie à son établissement, ce qu’elle a saisi. */
-function ligneAnnuaire(valeurs) {
+function ligneAnnuaire(valeurs, domaine = domaineDe(etat.emailConnexion)) {
   const a = CONFIG.annuaire;
   return ['AddRecord', CONFIG.tables.annuaire, null, {
-    [a.nom]: valeurs.nom, [a.prenom]: valeurs.prenom, [a.email]: etat.emailConnexion, [a.domaine]: domaineDe(etat.emailConnexion), [a.etablissement]: valeurs.etablissement,
+    [a.nom]: valeurs.nom, [a.prenom]: valeurs.prenom, [a.email]: etat.emailConnexion, [a.domaine]: domaine, [a.etablissement]: valeurs.etablissement,
   }];
+}
+
+/** La ligne du journal des demandes (l’e-mail de connexion, le nom du compte et la date sont ajoutés par Grist). */
+function ligneDemande(valeurs) {
+  const d = CONFIG.demandes;
+  return ['AddRecord', d.table, null, { [d.nom]: valeurs.nom, [d.prenom]: valeurs.prenom, [d.emailSaisi]: valeurs.emailSaisi, [d.etablissement]: valeurs.etablissement }];
+}
+
+/* --- Inscription automatique : nom, prénom et établissement tirés de la connexion ------------------------------------ */
+
+// Mots qui font partie d’un nom de famille (« Marie de la Fontaine ») : ils restent avec lui.
+const PARTICULES_NOM = new Set(['de', 'du', 'des', 'd', 'la', 'le', 'les', 'l', 'von', 'van', 'der', 'den', 'di', 'da', 'dos', 'del', 'ben', 'el', 'al']);
+
+/** « DUPONT », « dupont-martin » -> « Dupont-Martin » ; un mot qui n’est pas tout en majuscules (« McDonald », « de ») est laissé tel quel. */
+function casseNom(mot) {
+  if (mot !== mot.toUpperCase() || mot === mot.toLowerCase()) return mot;
+  return mot.toLowerCase().replace(/(^|[-'’])(\p{L})/gu, (m, avant, lettre) => avant + lettre.toUpperCase());
+}
+
+/** Les mots d’un nom de famille : casse normalisée, particules (« de », « la »…) en minuscules sauf en tête. */
+const formaterNom = (mots) => mots.map((m, i) => (i > 0 && PARTICULES_NOM.has(m.toLowerCase()) ? m.toLowerCase() : casseNom(m))).join(' ');
+
+/**
+ * Prénom et nom d’une personne d’après le nom de son compte Grist (un seul texte, « Prénom NOM » avec ProConnect) :
+ *  - des mots en majuscules désignent le nom (« Jean-Pierre DE LA FONTAINE », « DUPONT Jean ») ;
+ *  - sinon le dernier mot est le nom, avec les particules qui le précèdent (« Marie de la Fontaine ») ;
+ *  - sans nom de compte (ou quand Grist n’a mis que l’adresse), on lit prenom.nom@domaine.
+ * Un nom composé peut être mal coupé : l’Annuaire se corrige à la main.
+ */
+function nomsDepuisCompte(nomCompte, email) {
+  const brut = texte(nomCompte).replace(/\s+/g, ' ');
+  const local = texte(email).split('@')[0];
+  const deLAdresse = !brut || brut.includes('@') || sansAccent(brut) === sansAccent(local);   // Grist n’a pas de nom : il met la partie locale de l’adresse
+  if (deLAdresse) {
+    const sansChiffres = (liste) => liste.map((m) => m.replace(/\d+$/, '')).filter((m) => /\p{L}/u.test(m));
+    let mots = sansChiffres(local.split(/[._+]+/));
+    if (mots.length === 1) mots = sansChiffres(mots[0].split('-'));   // « jean-dupont@ » : sans point, le tiret sépare ; « jean-pierre.dupont@ » garde son prénom composé
+    if (!mots.length) return { prenom: '', nom: local };
+    const majusculesAdresse = mots.map((m) => m.toUpperCase());
+    const prenom = casseNom(majusculesAdresse[0]);
+    return mots.length > 1
+      ? { prenom: prenom.length === 1 ? `${prenom}.` : prenom, nom: formaterNom(majusculesAdresse.slice(1)) }   // « c.chatilli@ » : l’initiale, pas un prénom d’une lettre
+      : { prenom: '', nom: formaterNom(majusculesAdresse) };
+  }
+  const mots = brut.split(' ');
+  const majuscules = mots.map((m) => m === m.toUpperCase() && m !== m.toLowerCase() && m.replace(/[^\p{L}]/gu, '').length >= 2);
+  let debutNom;
+  let finNom = mots.length;
+  if (majuscules.some(Boolean) && !majuscules.every(Boolean)) {
+    if (majuscules[0]) {                                  // « DUPONT Jean » : le nom est en tête
+      debutNom = 0;
+      finNom = majuscules.findIndex((m) => !m);
+    } else debutNom = majuscules.indexOf(true);           // « Jean DUPONT » : du premier mot en majuscules à la fin
+  } else {
+    debutNom = mots.length - 1;                           // le dernier mot, avec ses particules
+    while (debutNom > 1 && PARTICULES_NOM.has(mots[debutNom - 1].toLowerCase().replace(/['’]$/, ''))) debutNom -= 1;
+    if (mots.length === 1) debutNom = 0;
+  }
+  const nom = formaterNom(mots.slice(debutNom, finNom));
+  const prenom = (debutNom === 0 && finNom < mots.length ? mots.slice(finNom) : mots.slice(0, debutNom)).map(casseNom).join(' ');
+  return { prenom, nom };
+}
+
+/** L’établissement dont un nom de domaine (`nom_de_domaine` ou `alt_domain`) est celui de l’e-mail ou, à défaut, un domaine parent (etu.u-bordeaux.fr -> u-bordeaux.fr) : { nom, domaine } ou null. */
+function etablissementPourDomaine(domaine) {
+  const d = sansAccent(domaine);
+  let retenu = null;
+  for (const ligne of etat.etablissements) {
+    for (const x of domainesEtablissement(ligne)) {
+      if ((d === x || d.endsWith(`.${x}`)) && (!retenu || x.length > retenu.domaine.length)) retenu = { nom: texte(ligne[CONFIG.etablissements.nom]), domaine: x };
+    }
+  }
+  return retenu;
+}
+
+/** Ce que l’inscription automatique écrit pour cette personne : { prenom, nom, etablissement, domaine }. */
+function identiteDeConnexion(email, nomCompte) {
+  const { prenom, nom } = nomsDepuisCompte(nomCompte, email);
+  const domaine = domaineDe(email);
+  const etab = etablissementPourDomaine(domaine);
+  return { prenom, nom, etablissement: etab ? etab.nom : '', domaine: etab ? etab.domaine : domaine };
 }
 
 /**
@@ -1283,9 +1402,7 @@ async function envoyerDemande(valeurs) {
   etat.demandeEnCours = true;
   etat.erreurDemande = '';
   rendre();
-  const demande = ['AddRecord', d.table, null, {
-    [d.nom]: valeurs.nom, [d.prenom]: valeurs.prenom, [d.emailSaisi]: valeurs.emailSaisi, [d.etablissement]: valeurs.etablissement,
-  }];
+  const demande = ligneDemande(valeurs);
   const inscription = ligneAnnuaire(valeurs);
   try {
     if (d.inscriptionAuto && etat.emailConnexion) {
@@ -1340,11 +1457,79 @@ async function terminerInscription() {
   if (etat.inscrit) setTimeout(() => location.reload(), 1500);
 }
 
+/** Mode d’inscription : le réglage, sauf dans le faux Grist de dev/ où l’adresse peut le changer (?inscription=formulaire). */
+const modeInscription = () => (typeof grist !== 'undefined' && grist.simule && new URLSearchParams(location.search).get('inscription')) || CONFIG.demandes.inscription;
+const inscriptionSansFenetre = () => modeInscription() === 'automatique';
+
+// Garde contre une boucle : une inscription réussie il y a moins de deux minutes n’est pas refaite si la personne n’est toujours pas reconnue.
+const GARDE_INSCRIPTION = 'agenda-inscription-auto';
+function inscriptionRecente() {
+  try { return Date.now() - Number(sessionStorage.getItem(GARDE_INSCRIPTION)) < 120000; } catch (err) { return false; }
+}
+function noterInscription() {
+  try { sessionStorage.setItem(GARDE_INSCRIPTION, String(Date.now())); } catch (err) { /* stockage indisponible : la règle d’accès empêche de toute façon un doublon */ }
+}
+
+/**
+ * Mode « automatique » : une personne connectée mais absente de l’Annuaire y est inscrite sans rien lui demander, avec son e-mail de connexion,
+ * le nom de son compte Grist et l’établissement du domaine de son e-mail. Une ligne du journal des demandes en garde la trace.
+ * Si les règles d’accès lui refusent de créer sa ligne, seule la trace est enregistrée (l’organisateur l’ajoute à la main) ;
+ * une demande déjà enregistrée (ancienne version, règle posée après coup) est reprise telle quelle, sans deuxième trace.
+ * Cela se passe pendant le chargement, avant le premier affichage. Réussie, l’inscription recharge aussitôt le widget (Grist a déjà mis à jour
+ * les droits de la personne : elle est reconnue au chargement suivant, sans avoir rien vu) et la fonction renvoie vrai.
+ */
+async function inscrireAutomatiquement() {
+  if (!inscriptionSansFenetre() || etat.acces !== 'hors_annuaire' || etat.moi || etat.inscrit || etat.inscription) return false;
+  if (inscriptionRecente()) { etat.inscription = 'echec'; return false; }
+  etat.inscription = 'encours';
+  try {
+    let valeurs = etat.demande;
+    let domaine = domaineDe(etat.emailConnexion);
+    if (!valeurs) {
+      if (etat.nomConnexion == null) etat.nomConnexion = await sonderConnexion().then((s) => s.nom, () => '');
+      const identite = identiteDeConnexion(etat.emailConnexion, etat.nomConnexion);
+      valeurs = { prenom: identite.prenom, nom: identite.nom, emailSaisi: etat.emailConnexion, etablissement: identite.etablissement };
+      domaine = identite.domaine;
+    }
+    const journal = etat.demande || etat.demandesDisponibles === false ? [] : [ligneDemande(valeurs)];
+    try {
+      await grist.docApi.applyUserActions([...journal, ligneAnnuaire(valeurs, domaine)]);
+      etat.inscrit = true;
+      etat.inscription = 'faite';
+      noterInscription();
+    } catch (err) {
+      if (!MOTIF_REFUS.test(texte(err && err.message))) throw err;
+      console.warn('Ajout à l’Annuaire refusé par les règles d’accès : trace seule', err);
+      if (journal.length) await grist.docApi.applyUserActions(journal);
+      etat.inscription = 'refusee';
+    }
+    if (!etat.demande && (etat.inscrit || journal.length)) etat.demande = { ...valeurs, date: Math.floor(Date.now() / 1000) };
+  } catch (err) {
+    console.error('Inscription automatique impossible', err);
+    etat.inscription = 'echec';
+  }
+  if (etat.inscrit) location.reload();
+  return etat.inscrit;
+}
+
+/** Ce que la personne lit pendant et après l’inscription automatique (sous l’en-tête), ou null si elle n’est pas concernée. */
+function messageInscription() {
+  if (!inscriptionSansFenetre() || etat.moi || etat.acces !== 'hors_annuaire') return null;
+  switch (etat.inscription) {
+    case 'faite': return { texte: 'Bienvenue ! Vous êtes inscrit(e) dans l’annuaire : le planning se recharge, vous pourrez ensuite indiquer vos présences.', erreur: false };
+    case 'refusee': return { texte: etat.demande
+      ? 'Votre demande est enregistrée : l’organisateur vous ajoute à l’annuaire dès que possible, vous pourrez alors indiquer vos présences.'
+      : 'Vous n’êtes pas encore dans l’annuaire : demandez à l’organisateur de vous y ajouter pour indiquer vos présences.', erreur: false };
+    case 'echec': return { texte: 'Votre inscription à l’annuaire n’a pas pu se faire automatiquement. Réessayez dans un instant ou prévenez l’organisateur.', erreur: true };
+    default: return { texte: 'Inscription à l’annuaire en cours…', erreur: false };
+  }
+}
+
 /** La fenêtre : montrée d’office une fois, puis à la demande (bouton de l’en-tête). Son contenu n’est refait que si l’état change (la saisie est préservée). */
 function rendreAcces() {
   const fenetre = el('acces');
   if (!fenetre) return;
-  if (!etat.acces) {
+  if (!etat.acces || (etat.acces === 'hors_annuaire' && inscriptionSansFenetre())) {
     if (fenetre.open) fenetre.close();
     return;
   }
@@ -1437,6 +1622,10 @@ if (typeof grist === 'undefined' || (window.self === window.top && !grist.simule
     await preparerCibles();
     await chargerAnnuaire();
     await verifierAcces();
+    if (await inscrireAutomatiquement()) {   // inscrite : la page se recharge, rien à afficher (si le rechargement tarde, un message prend le relais)
+      setTimeout(() => { etat.pret = true; rendre(); }, 4000);
+      return;
+    }
     etat.pret = true;
     rendre();
     setInterval(() => { chargerEvenements(); chargerEtablissements(); chargerAnnuaire(); }, CONFIG.rafraichissementMs);
