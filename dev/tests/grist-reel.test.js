@@ -755,12 +755,40 @@ describe('vrai Grist', { skip: disponible ? false : `Grist ne répond pas sur ${
       await attendre(async () => (await miennes(PROPRIO, doc, INCONNU)).length === 1);
     });
 
-    test('une table ajoutée plus tard est fermée aux personnes hors Annuaire d\'office', async () => {
+    test('les tables inutiles au widget (journaux de synchro, table ajoutée plus tard) sont fermées et invisibles pour tout le monde sauf les propriétaires', async () => {
       const doc = await nouveau({ publique: true });
-      await appliquer(PROPRIO, doc.doc, [['AddTable', 'Brouillon', [{ id: 'A', type: 'Text', isFormula: false }]], ['AddRecord', 'Brouillon', null, { A: 'secret' }]]);
+      const colonnesJournal = ['Synchro_Export', 'Sync_Par', 'Synchro_Donnees'].map((id) => ({ id, type: 'Text', isFormula: false }));
+      await appliquer(PROPRIO, doc.doc, [
+        ['AddTable', 'Journal_Etablissements', colonnesJournal], ['AddTable', 'Journal_Membres_Espaces_Resana', colonnesJournal],
+        ['AddTable', 'Brouillon', [{ id: 'A', type: 'Text', isFormula: false }]],
+      ]);
+      await appliquer(PROPRIO, doc.doc, ['Journal_Etablissements', 'Journal_Membres_Espaces_Resana', 'Brouillon'].map((t) => ['AddRecord', t, null, { [t === 'Brouillon' ? 'A' : 'Synchro_Donnees']: 'secret' }]));
+      // comme chez Antoine : la règle propre à chaque journal (lecture refusée aux lecteurs) existe déjà ; rien d'autre n'y est ajouté
+      const ressources = await appliquer(PROPRIO, doc.doc, ['Journal_Etablissements', 'Journal_Membres_Espaces_Resana'].map((tableId) => ['AddRecord', '_grist_ACLResources', null, { tableId, colIds: '*' }]));
+      await appliquer(PROPRIO, doc.doc, ressources.map((resource) => ['AddRecord', '_grist_ACLRules', null, { resource, aclFormula: 'user.Access == VIEWER', permissionsText: '-R', memo: 'Synchro : journaux réservés aux éditeurs', rulePos: 100 }]));
+      const fermees = ['Journal_Etablissements', 'Journal_Membres_Espaces_Resana', 'Brouillon'];
+      assert.equal((await lignes(PROPRIO, doc.doc, 'Journal_Etablissements')).length, 1, 'le propriétaire les lit');
+      for (const [nom, utilisateur] of [['une personne de l\'Annuaire', JEANNE], ['une personne hors Annuaire', INCONNU]]) {
+        for (const table of fermees) {
+          await assert.rejects(lignes(utilisateur, doc.doc, table), /403/, `${nom} ne lit pas ${table}`);
+          await assert.rejects(appliquer(utilisateur, doc.doc, [['AddRecord', table, null, {}]]), /403/, `${nom} n'écrit pas dans ${table}`);
+          await assert.rejects(appliquer(utilisateur, doc.doc, [['UpdateRecord', table, 1, { [table === 'Brouillon' ? 'A' : 'Synchro_Donnees']: 'x' }]]), /403/);
+        }
+        const visibles = (await api(utilisateur, 'GET', `/docs/${doc.doc}/tables`)).tables.map((t) => t.id);
+        for (const table of fermees) assert.ok(!visibles.includes(table), `${nom} ne voit pas la table ${table} (${visibles})`);
+        for (const table of ['Evenements', 'Etablissement', 'Participations']) assert.ok(visibles.includes(table), `${nom} voit ${table}`);
+      }
+      assert.ok((await api(JEANNE, 'GET', `/docs/${doc.doc}/tables`)).tables.some((t) => t.id === 'Annuaire'), 'une personne de l\'Annuaire voit l\'Annuaire');
+      assert.ok(!(await api(INCONNU, 'GET', `/docs/${doc.doc}/tables`)).tables.some((t) => t.id === 'Annuaire'), 'une personne hors Annuaire ne le voit pas');
+      assert.equal(await anonyme('GET', `/docs/${doc.doc}/tables/Journal_Etablissements/records`), 403);
       assert.equal(await anonyme('GET', `/docs/${doc.doc}/tables/Brouillon/records`), 403);
-      await assert.rejects(lignes(INCONNU, doc.doc, 'Brouillon'), /403/);
-      assert.equal((await lignes(JEANNE, doc.doc, 'Brouillon')).length, 1, 'une personne de l\'Annuaire la lit');
+      // et le widget fonctionne comme avant pour une personne de l'Annuaire et pour une personne qui s'inscrit
+      const j = await ouvrir(JEANNE, doc);
+      assert.equal(await j.widget.locator(SEL.nom).innerText(), 'Jeanne Delmas');
+      await carte(j.widget, 'Atelier Durable').locator(SEL.present).click();
+      await attendre(async () => (await miennes(PROPRIO, doc, JEANNE)).length === 1);
+      const { widget } = await ouvrir(INCONNU, doc);
+      await attendre(async () => (await widget.locator(SEL.nom).innerText()) === 'Inconnu', { message: 'la personne n\'est pas inscrite' });
     });
   });
 

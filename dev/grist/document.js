@@ -169,8 +169,8 @@ async function installerReglesPartagePublic(doc) {
     regle(demandes, 'user.IsLoggedIn and newRec.Email == user.Email', '+C'),
     regle(demandes, 'user.IsLoggedIn and rec.Email == user.Email', '+R+D'),
     regle(demandes, '', '-R-U-C-D'),
-    // Toute autre table (par exemple une table ajoutée plus tard) : fermée à qui n'est pas dans l'Annuaire
-    regle(defaut, horsAnnuaire, '-R-U-C-D'),
+    // Toute autre table que celles du widget (journaux de synchro, table ajoutée plus tard) : fermée, et invisible, à qui n'est pas propriétaire
+    regle(defaut, 'user.Access not in [OWNER]', '-R-U-C-D'),
     regle(defaut, 'user.Access != OWNER', '-S'),   // « Autoriser les éditeurs à modifier la structure » décoché
   ].map((r, i) => ({ ...r, rulePos: i + 1 }));
   await appliquer(PROPRIETAIRE, doc, rules.map((r) => ['AddRecord', '_grist_ACLRules', null, r]));
