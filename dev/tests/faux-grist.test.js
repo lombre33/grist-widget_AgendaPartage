@@ -574,22 +574,35 @@ describe('accès : connexion (personne anonyme) et demande d\'ajout à l\'Annuai
     await fenetre(page).waitFor();
     assert.match(await fenetre(page).locator('h2').innerText(), /Connectez-vous pour participer/);
     const texte = await fenetre(page).innerText();
+    assert.match(texte, /Pour pouvoir remplir le planning, vous devez être connecté\(e\)\. Pas de compte à créer : c’est le même compte que Resana, via ProConnect\./);
     assert.match(texte, /Cliquez sur « Se connecter »/);
     assert.match(texte, /Choisissez ProConnect/);
     assert.match(texte, /même connexion que pour Resana/);
     assert.equal(await fenetre(page).locator('figure svg[role="img"]').count(), 3, 'trois étapes illustrées');
+    // en bas de la fenêtre : « Se connecter » est un lien vers la page de connexion de Grist (nouvel onglet), plus de « J’ai compris »
+    const connexion = fenetre(page).locator('.acces__actions a.acces__bouton');
+    assert.equal(await connexion.count(), 1);
+    assert.equal(await connexion.getAttribute('target'), '_blank');
+    assert.match(await connexion.getAttribute('rel'), /noopener/);
+    const adresse = await connexion.getAttribute('href');
+    assert.match(adresse, /^https:\/\/exemple\.invalid\/login\?next=%2Fx%2F.+%2Fp%2F7%3Fstyle%3DsinglePage$/, 'retour sur la page du planning en ?style=singlePage');
+    assert.equal(await fenetre(page).getByRole('button', { name: 'J’ai compris' }).count(), 0);
     assert.equal(await page.locator(SEL.evenement).count(), 30);
     assert.equal(await page.locator('button[data-action="choisir"]').count(), 0);
     // rien n'est écrit : la ligne de sondage est refusée à une personne anonyme
     assert.deepEqual((await demandes(page)).map((a) => a[0]), ['AddRecord']);
     assert.equal((await lignes(page)).length, 0 + (await lignes(page)).length);
-    // fermer, puis la rouvrir par le bouton de l'en-tête
-    await fenetre(page).getByRole('button', { name: 'J’ai compris' }).click();
+    // fermer la fenêtre sans se connecter : le planning reste lisible
+    await fenetre(page).getByRole('button', { name: 'Voir le planning' }).click();
     await page.locator('#acces[open]').waitFor({ state: 'detached' });
-    await page.locator('#moi button').click();
-    await fenetre(page).waitFor();
-    await page.keyboard.press('Escape');
-    await page.locator('#acces[open]').waitFor({ state: 'detached' });
+    // le bouton de l'en-tête mène lui aussi directement à la connexion (Grist masque le sien en ?style=singlePage)
+    const entete = page.locator('#moi a.moi__bouton');
+    assert.equal(await entete.count(), 1);
+    assert.match(await entete.innerText(), /Se connecter pour participer/);
+    assert.equal(await entete.getAttribute('href'), adresse);
+    assert.equal(await entete.getAttribute('target'), '_blank');
+    assert.equal(await page.locator('#moi button').count(), 0);
+    assert.equal(await page.locator('#acces[open]').count(), 0, 'le lien ne rouvre pas la fenêtre');
     assert.match(await page.locator(SEL.etat).innerText(), /connectez-vous à Grist avec votre adresse professionnelle/);
     aucuneErreur(page);
   });

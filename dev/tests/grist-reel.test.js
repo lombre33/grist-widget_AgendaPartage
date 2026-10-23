@@ -502,7 +502,7 @@ describe('vrai Grist', { skip: disponible ? false : `Grist ne répond pas sur ${
     /** La fenêtre s'ouvre d'office au chargement ; le bouton de l'en-tête est aussi là pour la rouvrir. */
     const fenetreAcces = async (widget) => {
       await widget.locator('#acces[open]').waitFor({ timeout: 15000 });
-      assert.equal(await widget.locator('#moi button').count(), 1, 'bouton de l\'en-tête');
+      assert.equal(await widget.locator('#moi button, #moi a.moi__bouton').count(), 1, 'bouton (ou lien vers la connexion) de l\'en-tête');
     };
 
     /** Appel de l'API sans aucune connexion (personne anonyme). */
@@ -814,11 +814,15 @@ describe('vrai Grist', { skip: disponible ? false : `Grist ne répond pas sur ${
         assert.match(await widget.locator(SEL.etat).innerText(), /connectez-vous à Grist avec votre adresse professionnelle/);
         assert.equal(await widget.locator(SEL.etat).evaluate((e) => e.classList.contains('etat--erreur')), false, 'pas présenté comme une panne');
         // le bouton du widget mène à la page de connexion de Grist, dans un nouvel onglet, avec retour sur le document
-        const lien = widget.locator('#acces a.acces__connexion');
+        const lien = widget.locator('#acces .acces__actions a.acces__bouton');
         // (l'API du document donne son identifiant court, que Grist accepte dans l'adresse : « /h7fDnJFmigRu »)
         const retour = (await widget.evaluate(() => CONFIG.connexion.retour)).replace('{doc}', doc.doc.slice(0, 12));
         assert.equal(await lien.getAttribute('href'), `${GRIST}/login?next=${encodeURIComponent(retour)}`);
+        assert.match(await lien.getAttribute('href'), /%3Fstyle%3DsinglePage$/, 'retour sur la page du planning en ?style=singlePage');
         assert.equal(await lien.getAttribute('target'), '_blank');
+        // le lien de l'en-tête (le bouton de Grist est masqué en ?style=singlePage) mène au même endroit ; la fenêtre ne propose plus « J'ai compris »
+        assert.equal(await widget.locator('#moi a.moi__bouton').getAttribute('href'), await lien.getAttribute('href'));
+        assert.equal(await widget.locator('#acces').getByRole('button', { name: 'J’ai compris' }).count(), 0);
         const [onglet] = await Promise.all([page.context().waitForEvent('page'), lien.click()]);
         await onglet.waitForLoadState();
         assert.match(onglet.url(), new RegExp(`^${GRIST.replace(/[.]/g, '\\.')}/(auth/)?login`));
@@ -846,7 +850,7 @@ describe('vrai Grist', { skip: disponible ? false : `Grist ne répond pas sur ${
       const { widget } = await ouvrir(JEANNE, doc, { suffixe: '?style=singlePage' });
       assert.equal(await widget.locator(SEL.nom).innerText(), 'Jeanne Delmas');
       assert.equal(await widget.locator('#acces[open]').count(), 0);
-      assert.equal(await widget.locator('#acces a.acces__connexion').count(), 0);
+      assert.equal(await widget.locator('#acces .acces__actions a.acces__bouton').count(), 0);
     });
   });
 

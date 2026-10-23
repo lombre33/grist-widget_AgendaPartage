@@ -102,7 +102,7 @@ const CIBLES = [
 ];
 
 /* Numéro de version, affiché en bas de page : il permet de vérifier quelle version Grist a chargée (cache du navigateur). */
-const VERSION = '2026-10-23 · t';
+const VERSION = '2026-10-23 · u';
 
 const JOURS_SEMAINE = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
 const MOIS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
@@ -1022,7 +1022,9 @@ function rendreEntete() {
     if (etat.acces === 'hors_annuaire' && inscriptionSansFenetre()) {   // inscription automatique : pas de fenêtre à rouvrir, juste l’état
       zone.textContent = { faite: 'Bienvenue !', refusee: 'Demande enregistrée', echec: 'Inscription impossible' }[etat.inscription] || 'Inscription en cours…';
     } else if (etat.acces) {   // la fenêtre d’explication peut être rouverte
-      zone.innerHTML = `<button type="button" class="moi__bouton" data-action="acces" data-focus="acces">${etat.acces === 'anonyme' ? 'Se connecter pour participer' : etat.inscrit ? 'Inscription enregistrée' : etat.demande ? (peutFinirInscription() ? 'Finir mon inscription' : 'Demande envoyée') : CONFIG.demandes.inscriptionAuto ? 'M’inscrire à l’annuaire' : 'Demander mon ajout'}</button>`;
+      if (etat.acces === 'anonyme' && etat.adresseConnexion) {   // Grist masque son propre bouton en ?style=singlePage : on mène directement à la connexion
+        zone.innerHTML = `<a class="moi__bouton" href="${echapper(etat.adresseConnexion)}" target="_blank" rel="noopener">Se connecter pour participer <span aria-hidden="true">↗</span></a>`;
+      } else zone.innerHTML = `<button type="button" class="moi__bouton" data-action="acces" data-focus="acces">${etat.acces === 'anonyme' ? 'Se connecter pour participer' : etat.inscrit ? 'Inscription enregistrée' : etat.demande ? (peutFinirInscription() ? 'Finir mon inscription' : 'Demande envoyée') : CONFIG.demandes.inscriptionAuto ? 'M’inscrire à l’annuaire' : 'Demander mon ajout'}</button>`;
     } else zone.textContent = 'Lecture seule';
   }
   const nb = etat.evenements.filter((e) => monStatut(e.id)).length;
@@ -1236,6 +1238,19 @@ const ILLUSTRATIONS = {
     <text x="22" y="84" font-family="Georgia, serif" font-size="13" fill="#3b1c13">En haut à droite</text>
     <rect x="22" y="96" width="190" height="8" rx="4" fill="#efe9ee"/>
   </svg>`,
+  boutonIci: `<svg viewBox="0 0 320 120" role="img" aria-label="Cette fenêtre : le bouton « Se connecter » est en bas à droite">
+    <rect x="1" y="1" width="318" height="118" rx="10" fill="#fff" stroke="#e5dce3" stroke-width="2"/>
+    <rect x="1" y="1" width="318" height="8" rx="4" fill="#b9348b"/>
+    <rect x="18" y="22" width="150" height="10" rx="5" fill="#3b1c13"/>
+    <rect x="18" y="42" width="240" height="7" rx="3.5" fill="#d9cfd7"/>
+    <rect x="18" y="56" width="200" height="7" rx="3.5" fill="#efe9ee"/>
+    <rect x="198" y="80" width="106" height="28" rx="14" fill="#b9348b"/>
+    <text x="251" y="98" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="700" fill="#fff">Se connecter ↗</text>
+    <rect x="193" y="75" width="116" height="38" rx="19" fill="none" stroke="#ffcc00" stroke-width="3.5"/>
+    <text x="22" y="98" font-family="Georgia, serif" font-size="13" fill="#3b1c13">Juste ici</text>
+    <path d="M78 94C108 94 150 94 184 94" fill="none" stroke="#3b1c13" stroke-width="3" stroke-linecap="round"/>
+    <path d="M175 87l10 7-10 7" fill="none" stroke="#3b1c13" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>`,
   service: `<svg viewBox="0 0 320 120" role="img" aria-label="Page de connexion : le bouton « S’identifier avec ProConnect »">
     <rect x="1" y="1" width="318" height="118" rx="10" fill="#fff" stroke="#e5dce3" stroke-width="2"/>
     <text x="160" y="30" text-anchor="middle" font-family="Georgia, serif" font-size="14" font-weight="700" fill="#3b1c13">Connexion</text>
@@ -1265,24 +1280,28 @@ function dateLongue(secondes) {
 /** Fenêtre pour une personne qui n’est pas connectée : comment se connecter, en trois étapes. */
 function contenuConnexion() {
   const { service, reference } = CONFIG.connexion;
+  const lien = etat.adresseConnexion;
   const etapes = [
-    ['bouton', 'Cliquez sur « Se connecter »', etat.adresseConnexion
-      ? `Le bouton se trouve en haut à droite de la page. Il n’y est pas ? Utilisez celui-ci (la connexion s’ouvre dans un nouvel onglet) : <a class="acces__connexion" href="${echapper(etat.adresseConnexion)}" target="_blank" rel="noopener">Se connecter <span aria-hidden="true">↗</span></a>`
-      : 'Le bouton se trouve en haut à droite de cette page.'],
+    lien
+      ? ['boutonIci', 'Cliquez sur « Se connecter »', 'Le bouton est en bas de cette fenêtre : la connexion s’ouvre dans un nouvel onglet.']
+      : ['bouton', 'Cliquez sur « Se connecter »', 'Le bouton se trouve en haut à droite de cette page.'],
     ['service', `Choisissez ${echapper(service)}`, `C’est la même connexion que pour ${echapper(reference)} : vos identifiants professionnels habituels.`],
     ['cocher', 'Revenez ici et cochez', 'Le planning vous reconnaît : choisissez « Présent » ou « À confirmer » pour chaque événement.'],
   ];
   return `
     <p class="acces__sur">Planning en lecture seule</p>
     <h2 id="acces-titre">Connectez-vous pour participer</h2>
-    <p class="acces__intro">Le planning est ouvert à tous. Pour indiquer les événements où vous serez, identifiez-vous : c’est rapide et il n’y a aucun compte à créer.</p>
+    <p class="acces__intro">Pour pouvoir remplir le planning, vous devez être connecté(e). Pas de compte à créer : c’est le même compte que ${echapper(reference)}, via ${echapper(service)}.</p>
     <ol class="acces__etapes">${etapes.map(([cle, titre, detail], i) => `
       <li><span class="acces__num" aria-hidden="true">${i + 1}</span>
         <div class="acces__texte"><h3>${titre}</h3><p>${detail}</p></div>
         <figure>${ILLUSTRATIONS[cle].replace('__SERVICE__', echapper(service)).replace('__REFERENCE__', echapper(reference))}</figure></li>`).join('')}
     </ol>
     <p class="acces__note">Votre adresse professionnelle doit figurer dans l’annuaire du pôle. Si ce n’est pas le cas, un formulaire vous permettra de demander votre ajout.</p>
-    <div class="acces__actions"><button type="button" class="acces__bouton" data-action="fermer-acces">J’ai compris</button></div>`;
+    <div class="acces__actions">${lien
+      ? `<button type="button" class="acces__lien" data-action="fermer-acces">Voir le planning</button>
+      <a class="acces__bouton" href="${echapper(lien)}" target="_blank" rel="noopener">Se connecter <span aria-hidden="true">↗</span></a>`
+      : '<button type="button" class="acces__bouton" data-action="fermer-acces">J’ai compris</button>'}</div>`;
 }
 
 /** Fenêtre pour une personne connectée mais absente de l’Annuaire : sa demande est enregistrée, ou le formulaire pour la faire. */

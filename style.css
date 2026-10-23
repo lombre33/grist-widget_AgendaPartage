@@ -288,8 +288,8 @@ img.avatar--probable { opacity: .6; }   /* seul le logo est atténué : les init
 .acces__actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px 12px; margin-top: 20px; }
 .acces__bouton { min-height: 44px; padding: 8px 22px; border: 0; border-radius: 999px; background: var(--magenta); color: #fff; font-weight: 700; }
 .acces__bouton:disabled { opacity: .6; cursor: progress; }
-.acces__connexion { display: inline-block; margin-top: 6px; padding: 8px 16px; border-radius: 999px; background: var(--magenta); color: #fff; font-weight: 700; text-decoration: none; }
-.acces__connexion:hover { text-decoration: underline; }
+a.acces__bouton { display: inline-flex; align-items: center; gap: 6px; text-decoration: none; }
+a.acces__bouton:hover { text-decoration: underline; text-underline-offset: 3px; }
 .acces__lien { min-height: 44px; padding: 8px 12px; border: 0; background: none; color: var(--gris); text-decoration: underline; }
 .acces__form { display: grid; gap: 12px; margin-top: 16px; }
 .acces__duo { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
