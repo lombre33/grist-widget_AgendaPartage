@@ -121,7 +121,8 @@ window.MOCK_EVENEMENTS = [
   "Public": "Enseignants-chercheurs, chercheurs, doctorants, étudiants de master",
   "Cibles": [
    "L",
-   "Recherche"
+   "Recherche",
+   "Entreprises"
   ],
   "Description": "Des binômes chercheur / industriel partagent leurs retours sur leurs collaborations ; présentation des dispositifs pour monter et financer des projets communs.",
   "Lien": "https://www.u-bordeaux.fr/evenements/entractes-regards-croises-sur-les-collaborations-entre-recherche-academique-en-sante-et-entreprise"
@@ -183,7 +184,8 @@ window.MOCK_EVENEMENTS = [
   "Public": "Enseignants-chercheurs, ingénieurs, professionnels de la formation",
   "Cibles": [
    "L",
-   "Pédagogie"
+   "Pédagogie",
+   "Entreprises"
   ],
   "Description": "Visite de la Learning Factory des Arts et Métiers : des plateformes pédagogiques proches de l’industrie, du prototypage à la production mécanique.",
   "Lien": "https://www.u-bordeaux.fr/evenements/les-evolutive-learning-factories-des-usines-ecoles-pour-apprendre-autrement"
@@ -233,7 +235,7 @@ window.MOCK_EVENEMENTS = [
   "Jour": 1795478400,
   "Debut": "16:00",
   "Fin": "18:00",
-  "Titre": "Construire autrement avec le hêtre, la terre-paille et le chanvre",
+  "Titre": "Construire autrement : bois de feuillus, et terres allégées",
   "Sous_titre": "",
   "Type": "Visite",
   "Temps_fort": "",
@@ -339,7 +341,7 @@ window.MOCK_EVENEMENTS = [
   "Jour": 1795564800,
   "Debut": "14:00",
   "Fin": "17:30",
-  "Titre": "Explorer l’Espace avec nos experts",
+  "Titre": "Space Meet-Up Nouvelle-Aquitaine : explorer l’Espace avec nos experts",
   "Sous_titre": "",
   "Type": "Conférence",
   "Temps_fort": "",
@@ -380,7 +382,7 @@ window.MOCK_EVENEMENTS = [
   "Jour": 1795564800,
   "Debut": "18:30",
   "Fin": "20:30",
-  "Titre": "Soirée des entreprises",
+  "Titre": "Salon des entreprises",
   "Sous_titre": "Du concept au démonstrateur",
   "Type": "Salon",
   "Temps_fort": "Acteurs socio-économiques",
@@ -440,7 +442,7 @@ window.MOCK_EVENEMENTS = [
   "Jour": 1795651200,
   "Debut": "10:30",
   "Fin": "12:15",
-  "Titre": "L’Échoppe des Sciences",
+  "Titre": "Échoppe des Sciences",
   "Sous_titre": "Découvrez, questionnez, adoptez !",
   "Type": "Atelier",
   "Temps_fort": "",
@@ -585,7 +587,7 @@ window.MOCK_EVENEMENTS = [
   "Jour": 1795737600,
   "Debut": "11:00",
   "Fin": "12:00",
-  "Titre": "Serious game « No wrong door » avec le Pôle universitaire d’innovation Bordeaux",
+  "Titre": "Serious Game « No wrong door » du Pôle universitaire d’innovation Bordeaux",
   "Sous_titre": "",
   "Type": "Atelier",
   "Temps_fort": "",

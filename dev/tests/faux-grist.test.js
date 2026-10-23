@@ -174,7 +174,7 @@ describe('publics visés (Pour qui ?)', () => {
     await bulle(page, 'entreprises').click();
     assert.equal(await carte(page, 'L’IA au service des patients').count(), 1);
     assert.equal(await carte(page, 'No wrong door').count(), 0);
-    assert.equal(await page.locator(SEL.evenement).count(), 13);
+    assert.equal(await page.locator(SEL.evenement).count(), 15);
   });
 
   test('Personnels : une seule séance (le serious game), qui s\'additionne aux autres publics, sans toucher à leurs comptes', async () => {
@@ -182,14 +182,14 @@ describe('publics visés (Pour qui ?)', () => {
     await bulle(page, 'personnels').click();
     const affiches = await titres(page);
     assert.equal(affiches.length, 1);
-    assert.match(affiches[0], /^Serious game .*No wrong door.* avec le Pôle universitaire d’innovation Bordeaux$/);
+    assert.match(affiches[0], /^Serious Game .*No wrong door.* du Pôle universitaire d’innovation Bordeaux$/);
     assert.match(await page.locator('#cibles-nb').innerText(), /^1 événement sur 30$/);
     assert.equal(await bulle(page, 'personnels').getAttribute('aria-pressed'), 'true');
     await bulle(page, 'etudiants').click();
     assert.equal(await page.locator(SEL.evenement).count(), 8);   // 7 étudiants + le serious game
     await bulle(page, 'personnels').click();
     assert.equal(await page.locator(SEL.evenement).count(), 7);
-    for (const [code, attendu] of [['pedagogie', 13], ['recherche', 16], ['entreprises', 13]]) {
+    for (const [code, attendu] of [['pedagogie', 13], ['recherche', 16], ['entreprises', 15]]) {
       await page.reload();
       await page.waitForSelector(SEL.evenement);
       await page.evaluate(() => localStorage.clear());
@@ -270,7 +270,7 @@ describe('publics visés (Pour qui ?)', () => {
     // les mêmes valeurs que la colonne livrée avec l'Excel (dev/evenements.js)
     const [ecrit, attendu] = await page.evaluate(() => [window.MOCK_TABLE_EVENEMENTS.Cibles, window.MOCK_EVENEMENTS.map((e) => e.Cibles)]);
     assert.deepEqual(ecrit, attendu);
-    for (const [code, nombre] of [['pedagogie', 13], ['recherche', 16], ['etudiants', 7], ['entreprises', 13], ['personnels', 1]]) {
+    for (const [code, nombre] of [['pedagogie', 13], ['recherche', 16], ['etudiants', 7], ['entreprises', 15], ['personnels', 1]]) {
       await bulle(page, code).click();
       assert.equal(await page.locator(SEL.evenement).count(), nombre, code);
       await bulle(page, code).click();

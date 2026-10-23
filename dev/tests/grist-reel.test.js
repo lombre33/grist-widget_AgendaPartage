@@ -148,7 +148,7 @@ describe('vrai Grist', { skip: disponible ? false : `Grist ne répond pas sur ${
       assert.equal(await widget.locator(SEL.evenement).count(), 1);
       assert.equal(await carte(widget, 'No wrong door').count(), 1);
       await widget.locator('[data-cible="personnels"]').evaluate((b) => b.click());
-      for (const [code, attendu] of [['pedagogie', 13], ['recherche', 16], ['etudiants', 7], ['entreprises', 13]]) {
+      for (const [code, attendu] of [['pedagogie', 13], ['recherche', 16], ['etudiants', 7], ['entreprises', 15]]) {
         await widget.locator(`[data-cible="${code}"]`).evaluate((b) => b.click());
         assert.equal(await widget.locator(SEL.evenement).count(), attendu, code);
         await widget.locator(`[data-cible="${code}"]`).evaluate((b) => b.click());
@@ -170,7 +170,7 @@ describe('vrai Grist', { skip: disponible ? false : `Grist ne répond pas sur ${
       const { page, widget } = await ouvrir(PROPRIO, doc);
       assert.deepEqual(await widget.locator('.bulle').allInnerTexts(), ['Pédagogie', 'Recherche', 'Étudiants', 'Entreprises', 'Personnels']);
       await widget.locator('[data-cible="entreprises"]').evaluate((b) => b.click());
-      assert.equal(await widget.locator(SEL.evenement).count(), 13);
+      assert.equal(await widget.locator(SEL.evenement).count(), 15);
       assert.deepEqual(page.erreurs, []);
       const j = await ouvrir(JEANNE, doc);
       assert.deepEqual(await j.widget.locator('.bulle').allInnerTexts(), ['Pédagogie', 'Recherche', 'Étudiants', 'Entreprises', 'Personnels']);

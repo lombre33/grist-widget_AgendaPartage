@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Génère l'Excel des événements de la Semaine de l'innovation 2026 (3e édition).
 
-Sources : planning PDF « mise à jour 13-10 » (titres, horaires, lieux) complété par
+Sources : planning PDF « mise à jour 22-10 » (titres, horaires, lieux, séances ouvertes aux entreprises) complété par
 les fiches de https://www.u-bordeaux.fr/evenements/ (type, public, adresse, lien).
 
 Usage : python3 data/build_xlsx.py [sortie.xlsx]
@@ -38,8 +38,8 @@ IMS = "351 cours de la Libération, 33400 Talence"
 ARTS_METIERS = "Esplanade des Arts et Métiers, 33400 Talence"
 BU_ST = "Avenue des Facultés, 33400 Talence"
 
-# Publics visés, d'après les quatre plannings par public (Pédagogie, Recherche, Étudiants, Entreprises) : une séance
-# est « pour » un public quand elle est surlignée sur son planning. Valeurs de la colonne « Cibles » (liste de choix).
+# Publics visés, d'après les quatre plannings par public (Pédagogie, Recherche, Étudiants, Entreprises ; ce dernier revu d'après
+# le planning du 22/10) : une séance est « pour » un public quand elle est surlignée sur son planning. Valeurs de la colonne « Cibles » (liste de choix).
 # Cinquième public, « Personnels » : la seule séance qu'aucun planning ne vise (public du site : personnels administratifs).
 PEDAGOGIE, RECHERCHE, ETUDIANTS, ENTREPRISES = "Pédagogie", "Recherche", "Étudiants", "Entreprises"
 PERSONNELS = "Personnels"
@@ -54,22 +54,22 @@ CIBLES = {
     (LUN, "14:00", "Atelier Durable"): (PEDAGOGIE, ETUDIANTS),
     (LUN, "18:00", "Conférence « L’IA au service des patients : quelles innovations en santé ? »"): TOUS,
     (MAR, "09:00", "Entrepreneuriat et innovation au service des transitions agroécologiques"): (ETUDIANTS, ENTREPRISES),
-    (MAR, "09:00", "Entractes : regards croisés sur les collaborations entre recherche académique en santé et entreprise"): (RECHERCHE,),
+    (MAR, "09:00", "Entractes : regards croisés sur les collaborations entre recherche académique en santé et entreprise"): (RECHERCHE, ENTREPRISES),
     (MAR, "09:00", "Matinale scientifique"): (RECHERCHE, ENTREPRISES),
-    (MAR, "11:00", "Les Evolutive Learning Factories, des usines-écoles pour apprendre autrement"): (PEDAGOGIE,),
+    (MAR, "11:00", "Les Evolutive Learning Factories, des usines-écoles pour apprendre autrement"): (PEDAGOGIE, ENTREPRISES),
     (MAR, "11:30", "Les DéJEUXners de l’innovation"): (ETUDIANTS,),
     (MAR, "14:00", "De la recherche à l’innovation concrète en entreprise : la valeur ajoutée d’un Centre de Ressources Technologiques comme le CATIE"): (ENTREPRISES,),
-    (MAR, "16:00", "Construire autrement avec le hêtre, la terre-paille et le chanvre"): (RECHERCHE, ETUDIANTS, ENTREPRISES),
+    (MAR, "16:00", "Construire autrement : bois de feuillus, et terres allégées"): (RECHERCHE, ETUDIANTS, ENTREPRISES),
     (MAR, "18:30", "Mardis de l’entrepreneuriat"): (RECHERCHE, ETUDIANTS),
     (MER, "09:00", "Faire grandir ses partenariats"): (RECHERCHE, ENTREPRISES),
     (MER, "10:00", "Micro et nanofabrication pour la photonique avancée"): (RECHERCHE, ENTREPRISES),
     (MER, "10:00", "Du laboratoire à l’entreprise, le potentiel de l’Open Source issu de la recherche"): (RECHERCHE, ENTREPRISES),
-    (MER, "14:00", "Explorer l’Espace avec nos experts"): (ENTREPRISES,),
+    (MER, "14:00", "Space Meet-Up Nouvelle-Aquitaine : explorer l’Espace avec nos experts"): (ENTREPRISES,),
     (MER, "17:40", "Les cellules de transfert technologique en pratique"): (RECHERCHE, ENTREPRISES),
-    (MER, "18:30", "Soirée des entreprises"): (ENTREPRISES,),
+    (MER, "18:30", "Salon des entreprises"): (ENTREPRISES,),
     (JEU, "09:00", "Albatros Techno Day 2026"): (RECHERCHE,),
     (JEU, "09:30", "CampusIABordeaux"): (PEDAGOGIE,),
-    (JEU, "10:30", "L’Échoppe des Sciences"): (PEDAGOGIE,),
+    (JEU, "10:30", "Échoppe des Sciences"): (PEDAGOGIE,),
     (JEU, "11:30", "Les DéJEUXners de l’innovation"): (ETUDIANTS,),
     (JEU, "13:00", "Pépinière numérique FabLabNab"): (PEDAGOGIE, RECHERCHE),
     (JEU, "14:00", "La robotique au service de la fabrication additive métallique"): (PEDAGOGIE, RECHERCHE, ENTREPRISES),
@@ -78,7 +78,7 @@ CIBLES = {
     (VEN, "09:00", "Des formations sur mesure pour faire évoluer ses pratiques"): (PEDAGOGIE, RECHERCHE),
     (VEN, "11:30", "CampusIABordeaux"): (PEDAGOGIE,),
     # Surligné sur aucun des quatre plannings ; public du site : personnels administratifs.
-    (VEN, "11:00", "Serious game « No wrong door » avec le Pôle universitaire d’innovation Bordeaux"): (PERSONNELS,),
+    (VEN, "11:00", "Serious Game « No wrong door » du Pôle universitaire d’innovation Bordeaux"): (PERSONNELS,),
 }
 
 
@@ -145,7 +145,7 @@ EVENEMENTS = [
      "Acteurs socio-économiques",
      "Visite commentée du CATIE, centre de ressources technologiques du numérique : expertises, équipements et projets menés avec des entreprises.",
      "de-la-recheche-linnovation-concrete-en-entreprise-la-valeur-ajoutee-dun-centre-de-ressources-technologiques-comme-le-catie"),
-    (MAR, "16:00", "18:00", "Construire autrement avec le hêtre, la terre-paille et le chanvre", "",
+    (MAR, "16:00", "18:00", "Construire autrement : bois de feuillus, et terres allégées", "",
      "Visite", "", "ENSAP Bordeaux", "Talence", "740 cours de la Libération, 33400 Talence",
      "Architectes, ingénieurs, chercheurs, étudiants, professionnels de la construction et de la filière bois",
      "Visite des démonstrateurs THRIVE et TNEB : construire avec le hêtre et les feuillus locaux, la terre-paille et le chanvre. Départs des visites à 16 h et 17 h.",
@@ -171,7 +171,7 @@ EVENEMENTS = [
      "Chercheurs du numérique, personnels de la valorisation, acteurs socio-économiques",
      "Valoriser les logiciels de recherche en Open Source : visibilité, collaborations avec les entreprises, modèles économiques, licences.",
      "du-laboratoire-lentreprise-le-potentiel-de-lopen-source-issu-de-la-recherche"),
-    (MER, "14:00", "17:30", "Explorer l’Espace avec nos experts", "",
+    (MER, "14:00", "17:30", "Space Meet-Up Nouvelle-Aquitaine : explorer l’Espace avec nos experts", "",
      "Conférence", "", "IMS, amphithéâtre Jean-Paul Dom", "Talence", "Bâtiment A31, " + IMS,
      "Acteurs socio-économiques du secteur spatial",
      "Découvrir les expertises, laboratoires et plateformes spatiales de l’université de Bordeaux, puis échanger avec les chercheurs (avec Aerospace Valley).",
@@ -181,7 +181,7 @@ EVENEMENTS = [
      "Enseignants-chercheurs, chercheurs, acteurs socio-économiques",
      "Les coulisses des collaborations laboratoires-entreprises et le rôle des cellules de transfert technologique.",
      "les-cellules-de-transfert-technologique-en-pratique"),
-    (MER, "18:30", "20:30", "Soirée des entreprises", "Du concept au démonstrateur",
+    (MER, "18:30", "20:30", "Salon des entreprises", "Du concept au démonstrateur",
      "Salon", TEMPS_FORT_SE, "Salle Badiane, Domaine du Haut-Carré", "Talence", HAUT_CARRE,
      "Acteurs socio-économiques (start-ups, deeptech, PME, ETI)",
      "Rencontrer les plateformes technologiques de l’université de Bordeaux et découvrir leurs équipements et compétences.",
@@ -197,7 +197,7 @@ EVENEMENTS = [
      "Enseignants-chercheurs",
      "Présentation de la plateforme CampusIABordeaux et de son usage avec les étudiants : publication, partage et réutilisation des données.",
      "campusiabordeaux-entrainez-vos-etudiants-sur-la-donnee"),
-    (JEU, "10:30", "12:15", "L’Échoppe des Sciences", "Découvrez, questionnez, adoptez !",
+    (JEU, "10:30", "12:15", "Échoppe des Sciences", "Découvrez, questionnez, adoptez !",
      "Atelier", "", "BU Sciences et Techniques", "Talence", "Salle « île aux oiseaux », " + BU_ST,
      "Enseignants-chercheurs",
      "Présentation du dispositif qui accompagne des projets d’acteurs de la société et co-construit des questions de recherche. Accueil café à 10 h 30, atelier à 10 h 45.",
@@ -233,7 +233,7 @@ EVENEMENTS = [
      "Accompagnants à l’innovation, enseignants-chercheurs",
      "Trois retours d’expérience sur des formations-accompagnements conçus sur mesure pour répondre à des besoins collectifs.",
      "des-formations-sur-mesure-pour-faire-evoluer-ses-pratiques"),
-    (VEN, "11:00", "12:00", "Serious game « No wrong door » avec le Pôle universitaire d’innovation Bordeaux", "",
+    (VEN, "11:00", "12:00", "Serious Game « No wrong door » du Pôle universitaire d’innovation Bordeaux", "",
      "Atelier", "", "IMS, Salle de conférence", "Talence", "Bâtiment A31, " + IMS,
      "Personnels administratifs",
      "Jeu en équipes de 4 à 5 personnes pour tester sa connaissance de l’écosystème d’innovation bordelais et savoir orienter les porteurs de projets.",
