@@ -449,3 +449,44 @@ describe('établissements à plusieurs noms de domaine (colonne alt_domain)', ()
     assert.equal((await f('trouverEtablissement', { domaine: 'irstea.fr', etablissement: '' })).cle, (await f('trouverEtablissement', { domaine: 'inrae.fr', etablissement: '' })).cle, 'même groupe que le domaine principal');
   });
 });
+
+describe('visiteurs anonymes et page de connexion', () => {
+  test('estAnonyme : l\'adresse que Grist donne à qui n\'est pas connecté, sans tenir compte de la casse ni des espaces', async () => {
+    for (const email of ['anon@getgrist.com', ' ANON@getgrist.com ']) assert.equal(await f('estAnonyme', email), true, email);
+    for (const email of ['', null, undefined, 'jeanne.delmas@u-bordeaux.fr', 'anon@exemple.org', 'anon@getgrist.com.fr']) assert.equal(await f('estAnonyme', email), false, String(email));
+  });
+
+  test('chercherAdresseConnexion : la page de connexion de Grist d\'après l\'adresse de l\'API du document, avec retour sur le document', async () => {
+    const cas = await page.evaluate(async () => {
+      const vrai = grist.docApi.getAccessToken;
+      const retourInitial = CONFIG.connexion.retour;
+      const avec = async (baseUrl, retour = '') => {
+        grist.docApi.getAccessToken = async () => ({ token: 't', baseUrl, ttlMsecs: 1000 });
+        CONFIG.connexion.retour = retour;
+        return chercherAdresseConnexion();
+      };
+      try {
+        const r = {
+          saas: await avec('https://docs.getgrist.com/api/docs/abc123'),
+          equipe: await avec('https://docs.getgrist.com/o/mon-equipe/api/docs/abc123'),
+          retour: await avec('https://docs.getgrist.com/api/docs/abc123', '/{doc}/Planning/p/4?style=singlePage'),
+          retourEquipe: await avec('https://grist.numerique.gouv.fr/o/pui-bordeaux/api/docs/h13zaBFF4FQJ', '/{doc}/Planning/p/4?style=singlePage'),
+          inattendue: await avec('https://docs.getgrist.com/autre/chose'),
+          protocole: await avec('javascript:alert(1)//api/docs/x'),
+        };
+        grist.docApi.getAccessToken = async () => { throw new Error('refus'); };
+        r.erreur = await chercherAdresseConnexion();
+        return r;
+      } finally { grist.docApi.getAccessToken = vrai; CONFIG.connexion.retour = retourInitial; }
+    });
+    assert.deepEqual(cas, {
+      saas: 'https://docs.getgrist.com/login?next=%2Fabc123',
+      equipe: 'https://docs.getgrist.com/o/mon-equipe/login?next=%2Fabc123',
+      retour: 'https://docs.getgrist.com/login?next=%2Fabc123%2FPlanning%2Fp%2F4%3Fstyle%3DsinglePage',
+      retourEquipe: 'https://grist.numerique.gouv.fr/o/pui-bordeaux/login?next=%2Fh13zaBFF4FQJ%2FPlanning%2Fp%2F4%3Fstyle%3DsinglePage',
+      inattendue: '',
+      protocole: '',
+      erreur: '',
+    });
+  });
+});

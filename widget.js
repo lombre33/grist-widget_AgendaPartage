@@ -72,7 +72,9 @@ const CONFIG = {
     inscriptionAuto: true,
   },
   // Fenêtre « Connectez-vous pour participer » : le service de connexion et le service que les gens connaissent déjà.
-  connexion: { service: 'ProConnect', reference: 'Resana' },
+  // `retour` : où Grist ramène la personne une fois connectée : chemin et paramètres de la page du planning, où « {doc} » devient l’identifiant
+  // du document (comme dans l’adresse de la page, sans l’hôte ni « /o/équipe »). Vide, elle retrouve le document.
+  connexion: { service: 'ProConnect', reference: 'Resana', retour: '/{doc}/Semaine-de-linnovation-2026/p/7?style=singlePage' },
   // Colonne « Cibles » de Evenements (publics visés, filtre « Pour qui ? ») : si elle n’existe pas, le widget la crée et la remplit
   // d’après les plannings PDF (cibles-planning.js) quand une personne qui peut modifier la structure du document l’ouvre.
   // Une colonne qui existe déjà n’est jamais modifiée. Mettre false pour ne jamais la créer.
@@ -100,7 +102,7 @@ const CIBLES = [
 ];
 
 /* Numéro de version, affiché en bas de page : il permet de vérifier quelle version Grist a chargée (cache du navigateur). */
-const VERSION = '2026-10-23 · s';
+const VERSION = '2026-10-23 · t';
 
 const JOURS_SEMAINE = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
 const MOIS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
@@ -137,6 +139,7 @@ const etat = {
   jeton: null,                 // { token, baseUrl, expire } pour les logos en pièce jointe
   annuaireRefuse: false,       // l’Annuaire est fermé à cette personne par les règles d’accès (document ouvert à tous)
   acces: '',                   // pourquoi la personne ne peut pas cocher : 'anonyme' (pas connectée) ou 'hors_annuaire' (connectée, absente de l’Annuaire)
+  adresseConnexion: '',        // la page de connexion de Grist (pour les personnes anonymes) ; vide si on ne sait pas la construire
   emailConnexion: '',          // son e-mail de connexion, quand on le connaît
   demandesDisponibles: false,  // la table des demandes d’ajout existe et cette personne peut y écrire
   demande: null,               // sa demande déjà enregistrée : { nom, prenom, emailSaisi, etablissement, date }
@@ -525,6 +528,11 @@ async function preparerParticipations() {
   await identifierParConnexion(existante);
 }
 
+// Grist donne cette adresse aux visiteurs qui ne sont pas connectés (document partagé à « toute personne possédant le lien ») :
+// ce n'est la personne de personne, et surtout pas quelqu'un à inscrire dans l'Annuaire.
+const EMAIL_ANONYME = 'anon@getgrist.com';
+const estAnonyme = (email) => texte(email).trim().toLowerCase() === EMAIL_ANONYME;
+
 const messageHorsAnnuaire = (email = etat.emailConnexion) =>
   `Votre adresse de connexion (${email}) n’est pas dans la table « ${CONFIG.tables.annuaire} » : demandez à y être ajouté(e) pour indiquer votre présence.`;
 
@@ -537,6 +545,11 @@ function identifierMoi() {
     return undefined;
   }
   const connexion = etat.connexion;
+  if (connexion && estAnonyme(connexion.email)) {   // pas connectée : jamais reconnue, même si une ligne de l'Annuaire porte cette adresse
+    etat.moi = null;
+    etat.messageMoi = 'Le planning est en lecture seule. Pour indiquer votre présence, connectez-vous à Grist avec votre adresse professionnelle : elle doit figurer dans l’annuaire du document.';
+    return undefined;
+  }
   if (connexion && connexion.email) {
     const p = etat.annuaire.find((x) => x.id === connexion.personne);
     if (p) return definir(p, trouverLogo(p));
@@ -1162,19 +1175,44 @@ async function lireMaDemande() {
   }
 }
 
+/**
+ * La page de connexion de Grist, d’après l’adresse de l’API du document (https://hôte[/o/équipe]/api/docs/identifiant). Avec `?style=singlePage`
+ * Grist masque tout son en-tête, donc son bouton « Se connecter » : le widget en propose un. Vide si l’adresse n’est pas celle qu’on attend.
+ */
+async function chercherAdresseConnexion() {
+  try {
+    const { baseUrl } = await grist.docApi.getAccessToken({ readOnly: true });
+    const url = new URL(baseUrl);
+    const m = url.pathname.match(/^(.*)\/api\/docs\/([^/]+)\/?$/);
+    if (!m || !/^https?:$/.test(url.protocol)) return '';
+    return `${url.origin}${m[1]}/login?next=${encodeURIComponent((CONFIG.connexion.retour || '/{doc}').replace('{doc}', m[2]))}`;
+  } catch (err) {
+    console.warn('Adresse de connexion introuvable', err);
+    return '';
+  }
+}
+
+/** Cette personne n’est pas connectée : la fenêtre de connexion s’ouvre, avec un bouton vers la page de connexion de Grist. */
+async function etreAnonyme() {
+  etat.acces = 'anonyme';
+  etat.adresseConnexion = await chercherAdresseConnexion();
+}
+
 /** Qui est cette personne qui n’est pas reconnue ? Renseigne `etat.acces` ('anonyme', 'hors_annuaire' ou '' si on ne sait pas). */
 async function verifierAcces() {
   etat.acces = '';
   if (etat.moi) return;
   try {
+    if (etat.connexion && estAnonyme(etat.connexion.email)) return await etreAnonyme();
     if (etat.connexion && etat.connexion.email && !etat.erreurAnnuaire) etat.emailConnexion = etat.connexion.email;   // l’Annuaire se lit : c’est son adresse qui y manque
     else if (etat.annuaireRefuse) {                                                                                    // l’Annuaire lui est fermé : est-elle connectée ?
       const sonde = await sonderConnexion();
+      if (estAnonyme(sonde.email)) return await etreAnonyme();
       etat.emailConnexion = sonde.email;
       etat.nomConnexion = sonde.nom;
     }
   } catch (err) {
-    if (MOTIF_REFUS.test(texte(err && err.message))) etat.acces = 'anonyme';
+    if (MOTIF_REFUS.test(texte(err && err.message))) await etreAnonyme();
     else console.warn('Sondage de la connexion impossible', err);
     return;
   }
@@ -1228,7 +1266,9 @@ function dateLongue(secondes) {
 function contenuConnexion() {
   const { service, reference } = CONFIG.connexion;
   const etapes = [
-    ['bouton', 'Cliquez sur « Se connecter »', 'Le bouton se trouve en haut à droite de cette page.'],
+    ['bouton', 'Cliquez sur « Se connecter »', etat.adresseConnexion
+      ? `Le bouton se trouve en haut à droite de la page. Il n’y est pas ? Utilisez celui-ci (la connexion s’ouvre dans un nouvel onglet) : <a class="acces__connexion" href="${echapper(etat.adresseConnexion)}" target="_blank" rel="noopener">Se connecter <span aria-hidden="true">↗</span></a>`
+      : 'Le bouton se trouve en haut à droite de cette page.'],
     ['service', `Choisissez ${echapper(service)}`, `C’est la même connexion que pour ${echapper(reference)} : vos identifiants professionnels habituels.`],
     ['cocher', 'Revenez ici et cochez', 'Le planning vous reconnaît : choisissez « Présent » ou « À confirmer » pour chaque événement.'],
   ];
@@ -1534,7 +1574,7 @@ function rendreAcces() {
     return;
   }
   if (!etat.accesPropose) { etat.accesPropose = true; etat.accesOuvert = true; }
-  const cle = [etat.acces, Boolean(etat.demande), etat.inscrit, etat.demandesDisponibles, etat.demandeEnCours, etat.erreurDemande, etat.etablissements.length].join('|');
+  const cle = [etat.acces, etat.adresseConnexion, Boolean(etat.demande), etat.inscrit, etat.demandesDisponibles, etat.demandeEnCours, etat.erreurDemande, etat.etablissements.length].join('|');
   if (fenetre.dataset.cle !== cle) {
     fenetre.dataset.cle = cle;
     fenetre.innerHTML = `<div class="acces__corps" tabindex="-1" autofocus>${etat.acces === 'anonyme' ? contenuConnexion() : contenuDemande()}</div>`;

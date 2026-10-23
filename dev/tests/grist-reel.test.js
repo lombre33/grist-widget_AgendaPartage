@@ -792,6 +792,64 @@ describe('vrai Grist', { skip: disponible ? false : `Grist ne répond pas sur ${
     });
   });
 
+  describe('visiteur anonyme : Grist le nomme anon@getgrist.com, le widget ne le prend pas pour une personne connectée', () => {
+    /** Le partage de la page de partage : « toute personne possédant le lien » en éditeur, sans autre règle que celles d'Antoine. */
+    const ouvertATous = async (options) => {
+      const doc = await nouveau(options);
+      await api(PROPRIO, 'PATCH', `/docs/${doc.doc}/access`, { delta: { users: { 'everyone@getgrist.com': 'editors' } } });
+      return doc;
+    };
+
+    for (const [nom, options] of [['règles d\'Antoine (Annuaire en lecture seule, demandes sans règle)', { regles: true }], ['aucune règle d\'accès', {}]]) {
+      test(`${nom} : fenêtre de connexion avec un bouton vers la page de connexion de Grist (?style=singlePage masque celui de Grist), rien n'est inscrit`, async () => {
+        const doc = await ouvertATous(options);
+        const avant = { annuaire: (await lignes(PROPRIO, doc.doc, 'Annuaire')).length, demandes: (await lignes(PROPRIO, doc.doc, 'Demandes_Annuaire')).length };
+        const { widget, page } = await ouvrir(null, doc, { suffixe: '?style=singlePage' });
+        assert.equal(await widget.locator(SEL.evenement).count(), 30, 'le planning est lisible');
+        await widget.locator('#acces[open]').waitFor({ timeout: 15000 });
+        assert.match(await widget.locator('#acces h2').innerText(), /Connectez-vous pour participer/);
+        assert.doesNotMatch(await widget.locator('body').innerText(), /Demande enregistrée|Inscription à l’annuaire|n’est pas dans la table|Bienvenue/);
+        assert.equal(await widget.locator('button[data-action="choisir"]').count(), 0, 'pas de boutons de choix');
+        assert.equal(await widget.locator(SEL.nom).count(), 0, 'pas présenté comme une personne');
+        assert.match(await widget.locator(SEL.etat).innerText(), /connectez-vous à Grist avec votre adresse professionnelle/);
+        assert.equal(await widget.locator(SEL.etat).evaluate((e) => e.classList.contains('etat--erreur')), false, 'pas présenté comme une panne');
+        // le bouton du widget mène à la page de connexion de Grist, dans un nouvel onglet, avec retour sur le document
+        const lien = widget.locator('#acces a.acces__connexion');
+        // (l'API du document donne son identifiant court, que Grist accepte dans l'adresse : « /h7fDnJFmigRu »)
+        const retour = (await widget.evaluate(() => CONFIG.connexion.retour)).replace('{doc}', doc.doc.slice(0, 12));
+        assert.equal(await lien.getAttribute('href'), `${GRIST}/login?next=${encodeURIComponent(retour)}`);
+        assert.equal(await lien.getAttribute('target'), '_blank');
+        const [onglet] = await Promise.all([page.context().waitForEvent('page'), lien.click()]);
+        await onglet.waitForLoadState();
+        assert.match(onglet.url(), new RegExp(`^${GRIST.replace(/[.]/g, '\\.')}/(auth/)?login`));
+        await onglet.close();
+        assert.equal((await lignes(PROPRIO, doc.doc, 'Annuaire')).length, avant.annuaire, 'aucune personne ajoutée à l\'Annuaire');
+        assert.equal((await lignes(PROPRIO, doc.doc, 'Demandes_Annuaire')).length, avant.demandes, 'aucune demande');
+        assert.equal((await participations(PROPRIO, doc)).length, 0, 'aucune présence, aucune ligne de connexion laissée');
+        assert.deepEqual(page.erreurs, []);
+      });
+    }
+
+    test('même si une ligne de l\'Annuaire porte l\'adresse anon@getgrist.com, le visiteur anonyme n\'est pas reconnu et ne peut rien cocher', async () => {
+      const doc = await ouvertATous({ regles: true });
+      await appliquer(PROPRIO, doc.doc, [['AddRecord', 'Annuaire', null, { prenom: 'Anonymous', nom: 'Anonymous', email: 'anon@getgrist.com', Etablissement: 'Université de Bordeaux' }]]);
+      const { widget } = await ouvrir(null, doc);
+      await widget.locator('#acces[open]').waitFor({ timeout: 15000 });
+      assert.match(await widget.locator('#acces h2').innerText(), /Connectez-vous pour participer/);
+      assert.equal(await widget.locator('button[data-action="choisir"]').count(), 0);
+      assert.equal(await widget.locator(SEL.nom).count(), 0);
+      assert.equal((await participations(PROPRIO, doc)).length, 0);
+    });
+
+    test('une personne connectée de l\'Annuaire n\'est pas touchée : reconnue, sans fenêtre de connexion', async () => {
+      const doc = await ouvertATous({ regles: true });
+      const { widget } = await ouvrir(JEANNE, doc, { suffixe: '?style=singlePage' });
+      assert.equal(await widget.locator(SEL.nom).innerText(), 'Jeanne Delmas');
+      assert.equal(await widget.locator('#acces[open]').count(), 0);
+      assert.equal(await widget.locator('#acces a.acces__connexion').count(), 0);
+    });
+  });
+
   describe('logos et liens', () => {
     test('le logo d\'un établissement (pièce jointe Grist) s\'affiche ; sans logo, les initiales', async () => {
       const doc = await nouveau({ logos: true });
