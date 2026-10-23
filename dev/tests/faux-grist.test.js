@@ -579,11 +579,10 @@ describe('accès : connexion (personne anonyme) et demande d\'ajout à l\'Annuai
     assert.match(texte, /Choisissez ProConnect/);
     assert.match(texte, /même connexion que pour Resana/);
     assert.equal(await fenetre(page).locator('figure svg[role="img"]').count(), 3, 'trois étapes illustrées');
-    // en bas de la fenêtre : « Se connecter » est un lien vers la page de connexion de Grist (nouvel onglet), plus de « J’ai compris »
+    // en bas de la fenêtre : « Se connecter » est un lien vers la page de connexion de Grist (même onglet : le widget est dans un cadre, la page entière change), plus de « J’ai compris »
     const connexion = fenetre(page).locator('.acces__actions a.acces__bouton');
     assert.equal(await connexion.count(), 1);
-    assert.equal(await connexion.getAttribute('target'), '_blank');
-    assert.match(await connexion.getAttribute('rel'), /noopener/);
+    assert.equal(await connexion.getAttribute('target'), '_top');
     const adresse = await connexion.getAttribute('href');
     assert.match(adresse, /^https:\/\/exemple\.invalid\/login\?next=%2Fx%2F.+%2Fp%2F7%3Fstyle%3DsinglePage$/, 'retour sur la page du planning en ?style=singlePage');
     assert.equal(await fenetre(page).getByRole('button', { name: 'J’ai compris' }).count(), 0);
@@ -600,7 +599,7 @@ describe('accès : connexion (personne anonyme) et demande d\'ajout à l\'Annuai
     assert.equal(await entete.count(), 1);
     assert.match(await entete.innerText(), /Se connecter pour participer/);
     assert.equal(await entete.getAttribute('href'), adresse);
-    assert.equal(await entete.getAttribute('target'), '_blank');
+    assert.equal(await entete.getAttribute('target'), '_top');
     assert.equal(await page.locator('#moi button').count(), 0);
     assert.equal(await page.locator('#acces[open]').count(), 0, 'le lien ne rouvre pas la fenêtre');
     assert.match(await page.locator(SEL.etat).innerText(), /connectez-vous à Grist avec votre adresse professionnelle/);

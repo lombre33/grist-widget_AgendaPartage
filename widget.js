@@ -102,7 +102,7 @@ const CIBLES = [
 ];
 
 /* Numéro de version, affiché en bas de page : il permet de vérifier quelle version Grist a chargée (cache du navigateur). */
-const VERSION = '2026-10-23 · u';
+const VERSION = '2026-10-23 · v';
 
 const JOURS_SEMAINE = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
 const MOIS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
@@ -1023,7 +1023,7 @@ function rendreEntete() {
       zone.textContent = { faite: 'Bienvenue !', refusee: 'Demande enregistrée', echec: 'Inscription impossible' }[etat.inscription] || 'Inscription en cours…';
     } else if (etat.acces) {   // la fenêtre d’explication peut être rouverte
       if (etat.acces === 'anonyme' && etat.adresseConnexion) {   // Grist masque son propre bouton en ?style=singlePage : on mène directement à la connexion
-        zone.innerHTML = `<a class="moi__bouton" href="${echapper(etat.adresseConnexion)}" target="_blank" rel="noopener">Se connecter pour participer <span aria-hidden="true">↗</span></a>`;
+        zone.innerHTML = `<a class="moi__bouton" href="${echapper(etat.adresseConnexion)}" target="_top">Se connecter pour participer</a>`;
       } else zone.innerHTML = `<button type="button" class="moi__bouton" data-action="acces" data-focus="acces">${etat.acces === 'anonyme' ? 'Se connecter pour participer' : etat.inscrit ? 'Inscription enregistrée' : etat.demande ? (peutFinirInscription() ? 'Finir mon inscription' : 'Demande envoyée') : CONFIG.demandes.inscriptionAuto ? 'M’inscrire à l’annuaire' : 'Demander mon ajout'}</button>`;
     } else zone.textContent = 'Lecture seule';
   }
@@ -1245,7 +1245,7 @@ const ILLUSTRATIONS = {
     <rect x="18" y="42" width="240" height="7" rx="3.5" fill="#d9cfd7"/>
     <rect x="18" y="56" width="200" height="7" rx="3.5" fill="#efe9ee"/>
     <rect x="198" y="80" width="106" height="28" rx="14" fill="#b9348b"/>
-    <text x="251" y="98" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="700" fill="#fff">Se connecter ↗</text>
+    <text x="251" y="98" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="700" fill="#fff">Se connecter</text>
     <rect x="193" y="75" width="116" height="38" rx="19" fill="none" stroke="#ffcc00" stroke-width="3.5"/>
     <text x="22" y="98" font-family="Georgia, serif" font-size="13" fill="#3b1c13">Juste ici</text>
     <path d="M78 94C108 94 150 94 184 94" fill="none" stroke="#3b1c13" stroke-width="3" stroke-linecap="round"/>
@@ -1283,7 +1283,7 @@ function contenuConnexion() {
   const lien = etat.adresseConnexion;
   const etapes = [
     lien
-      ? ['boutonIci', 'Cliquez sur « Se connecter »', 'Le bouton est en bas de cette fenêtre : la connexion s’ouvre dans un nouvel onglet.']
+      ? ['boutonIci', 'Cliquez sur « Se connecter »', 'Le bouton est en bas de cette fenêtre.']
       : ['bouton', 'Cliquez sur « Se connecter »', 'Le bouton se trouve en haut à droite de cette page.'],
     ['service', `Choisissez ${echapper(service)}`, `C’est la même connexion que pour ${echapper(reference)} : vos identifiants professionnels habituels.`],
     ['cocher', 'Revenez ici et cochez', 'Le planning vous reconnaît : choisissez « Présent » ou « À confirmer » pour chaque événement.'],
@@ -1300,7 +1300,7 @@ function contenuConnexion() {
     <p class="acces__note">Votre adresse professionnelle doit figurer dans l’annuaire du pôle. Si ce n’est pas le cas, un formulaire vous permettra de demander votre ajout.</p>
     <div class="acces__actions">${lien
       ? `<button type="button" class="acces__lien" data-action="fermer-acces">Voir le planning</button>
-      <a class="acces__bouton" href="${echapper(lien)}" target="_blank" rel="noopener">Se connecter <span aria-hidden="true">↗</span></a>`
+      <a class="acces__bouton" href="${echapper(lien)}" target="_top">Se connecter</a>`
       : '<button type="button" class="acces__bouton" data-action="fermer-acces">J’ai compris</button>'}</div>`;
 }
 
