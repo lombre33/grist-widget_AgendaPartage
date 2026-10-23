@@ -11,7 +11,7 @@ HTML, CSS et JavaScript natifs : la seule dépendance est le script officiel `gr
 | `assets/fonts/` | la police Bitter (graisses 400 et 700, licence OFL jointe), servie avec le widget : aucun appel à un service extérieur |
 | `data/Evenements_Semaine_Innovation_2026.xlsx` | les 30 séances, à importer dans Grist |
 | `data/build_xlsx.py` | génère l’Excel (et les données de test) à partir de la liste des événements |
-| `data/modifs-planning-22-oct.json`, `dev/grist/maj-evenements.js` | les cellules changées par le planning du 22/10 et l’outil qui les applique en place à un document en service (voir « Mettre à jour les événements ») |
+| `maj-planning.js` | les cellules de `Evenements` changées par le planning du 22/10 : le widget les corrige en place dans un document déjà en service (voir « Mettre à jour les événements ») |
 | `dev/` | faux Grist pour tester dans un navigateur, scripts d’un vrai Grist local et batterie de tests (voir « Tests ») |
 | `package.json` | ne sert qu’aux tests (le widget n’a aucune dépendance) |
 
@@ -141,7 +141,7 @@ La batterie (`npm test`, soit `node --test dev/tests/*.test.js`) a trois étages
 | Unitaire | `dev/tests/unitaires.test.js` | les fonctions de `widget.js` (lecture des valeurs Grist, dates et heures, références `{ tableId, rowId }`, logos, établissements, participants, regroupements, liens de carte) et la politique de sécurité de `index.html` |
 | Faux Grist | `dev/tests/faux-grist.test.js` | l’écran dans un navigateur : jours, filtre, boutons de choix, compteurs, liste des participants, messages d’erreur, toutes les options `?…` ci-dessous |
 | Vrai Grist | `dev/tests/grist-reel.test.js` | le widget dans l’image officielle de Grist, avec plusieurs personnes connectées en même temps : première ouverture, enregistrement, doublons et lignes oubliées, mise à jour en direct, règles d’accès d’Antoine (attribut utilisateur `acl`) sans rechargement de la page, règles recommandées ci-dessus (impossible d’écrire à la place d’un autre), document ouvert à tout le monde (anonyme, personne hors Annuaire, membre non ajouté nommément), lecteur, personne absente de l’Annuaire, logos en pièces jointes, lien de carte, colonne `Email` masquée (aucune colonne en trop, aucune donnée perdue), politique de sécurité (CSP) active |
-| Mise à jour du planning | `dev/tests/maj-evenements.test.js` | `dev/grist/maj-evenements.js` dans un vrai Grist : la table `Evenements` de la version du 13/10 avec des présences de trois personnes devient exactement celle du 22/10, mêmes lignes, présences inchangées (pages ouvertes avant et après), cellule retouchée à la main laissée telle quelle, contre-exemple de la réimportation (toutes les présences effacées) |
+| Mise à jour du planning | `dev/tests/maj-evenements.test.js` | le widget corrige en place les cellules de `Evenements` dans un vrai Grist : la table de la version du 13/10, avec des présences de trois personnes, devient exactement celle du 22/10, mêmes lignes, présences inchangées (pages ouvertes avant et après) ; éditrice sans droit : rien ne change, sans bruit ; cellule retouchée à la main laissée telle quelle ; colonne `Cibles` à créer ; contre-exemple de la réimportation (toutes les présences effacées) |
 
 L’étage « vrai Grist » est ignoré tant que Grist ne répond pas. Pour le lancer (Docker requis, image `gristlabs/grist`) :
 
@@ -163,11 +163,6 @@ Modifier la liste `EVENEMENTS` dans `data/build_xlsx.py` puis `python3 data/buil
 
 **Dans un document déjà en service, ne jamais vider puis réimporter la table `Evenements`** : chaque présence de `Participations` pointe vers le numéro de ligne de son événement, et Grist remet à zéro les références vers une ligne supprimée (les choix de tout le monde disparaîtraient ; le test `maj-evenements` le montre). Corriger les cellules en place : une ligne existante garde son numéro, quel que soit ce qu’on change dedans, et un nouvel événement est une nouvelle ligne.
 
-Pour quelques cellules, le plus sûr est de les modifier à la main dans Grist. Pour une liste précise, `dev/grist/maj-evenements.js` fait la même chose à partir d’un fichier de modifications (`data/modifs-planning-22-oct.json` : séance reconnue par son jour, son début et son titre, valeur attendue avant, valeur écrite après). Il simule par défaut, n’écrit que les cellules listées, laisse de côté toute cellule déjà retouchée à la main, puis relit le document pour vérifier qu’aucune autre cellule ni aucune présence n’a bougé :
-
-```sh
-GRIST_API_KEY=… node dev/grist/maj-evenements.js --doc IDENTIFIANT_DU_DOCUMENT              # simulation
-GRIST_API_KEY=… node dev/grist/maj-evenements.js --doc IDENTIFIANT_DU_DOCUMENT --appliquer  # écriture
-```
+Le widget peut le faire lui-même : `maj-planning.js` liste les cellules à corriger (séance reconnue par son jour, son début et son titre, valeur attendue avant, valeur écrite après). À l’ouverture par une personne qui peut modifier les lignes de `Evenements` (avec les règles d’accès d’Antoine : les propriétaires), il écrit ces cellules en un seul lot « tout ou rien » et affiche « Planning mis à jour… ». Pour les autres personnes l’écriture est refusée sans bruit et rien ne change. Une cellule retouchée à la main n’est jamais écrasée, aucune ligne n’est supprimée ni ajoutée, et une fois les corrections faites il n’y a plus rien à écrire. `corrigerPlanning: false` dans `CONFIG` les coupe. Une fois appliquées, ce code n’a plus d’utilité : le retirer (`corrigerPlanning` et `planifierCorrections` dans `widget.js`, `maj-planning.js`, sa balise dans `index.html`).
 
 Sources : planning PDF « mise à jour 22-10 » (qui fait foi sur le site) et fiches de <https://www.u-bordeaux.fr/evenements/semaine-de-linnovation-2026-3e-edition>.
