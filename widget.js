@@ -75,13 +75,8 @@ const CONFIG = {
   connexion: { service: 'ProConnect', reference: 'Resana' },
   // Colonne « Cibles » de Evenements (publics visés, filtre « Pour qui ? ») : si elle n’existe pas, le widget la crée et la remplit
   // d’après les plannings PDF (cibles-planning.js) quand une personne qui peut modifier la structure du document l’ouvre.
-  // Une colonne qui existe déjà n’est jamais modifiée (hors corrections ci-dessous). Mettre false pour ne jamais la créer.
+  // Une colonne qui existe déjà n’est jamais modifiée. Mettre false pour ne jamais la créer.
   creerColonneCibles: true,
-  // Corrections de cellules de Evenements décidées après l'import (maj-planning.js : planning du 22/10/2026). Quand une personne qui peut modifier
-  // les lignes de Evenements ouvre le widget, il corrige en place les cellules concernées (jamais de ligne supprimée ni ajoutée : les présences
-  // restent attachées à leur séance). Une cellule retouchée à la main n'est pas écrasée ; une fois faites, les corrections ne font plus rien.
-  // Mettre false pour ne jamais les appliquer.
-  corrigerPlanning: true,
   // Les événements, l’Annuaire et les logos changent rarement : on les relit à cet intervalle
   // (les présences, elles, arrivent en direct).
   rafraichissementMs: 60000,
@@ -105,7 +100,7 @@ const CIBLES = [
 ];
 
 /* Numéro de version, affiché en bas de page : il permet de vérifier quelle version Grist a chargée (cache du navigateur). */
-const VERSION = '2026-10-23 · q';
+const VERSION = '2026-10-23 · r';
 
 const JOURS_SEMAINE = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
 const MOIS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
@@ -348,62 +343,6 @@ async function preparerCibles() {
     await chargerEvenements();
   } catch (err) {
     console.warn('Création de la colonne Cibles impossible', err);
-  }
-}
-
-/**
- * Ce que les corrections (`corrections` : maj-planning.js) changeraient dans les lignes de Evenements. Une séance se reconnaît à son jour,
- * son début et son titre (avant la correction) ; une cellule n'est prévue que si elle contient encore la valeur « avant » : celle qu'une
- * personne a retouchée à la main n'est jamais écrasée. Renvoie, pour chaque correction, son état : « a-faire » (avec le numéro de ligne et les
- * cellules à écrire), « deja-fait », « introuvable », « ambigu » (plusieurs lignes), « different » (cellule retouchée) ou « colonne-absente ».
- */
-function planifierCorrections(lignes, corrections = window.MAJ_PLANNING || []) {
-  const c = CONFIG.evenements;
-  const colonneDe = (champ) => (champ === 'Cibles' ? c.cibles : c.titre);
-  const strict = (v) => texte(v).normalize('NFC').replace(/[’‘]/g, "'").replace(/\s+/g, ' ');   // « avant » et « après » se comparent mot pour mot, casse comprise
-  const memeCellule = (champ, a, b) => (champ === 'Cibles' ? lireCibles(a).join('|') === lireCibles(b).join('|') : strict(a) === strict(b));
-  return corrections.map((m) => {
-    const champs = Object.keys(m.apres);
-    const memeSeance = (l, titre) => versIso(l[c.jour]) === m.jour && minutesDe(versHeure(l[c.debut])) === minutesDe(versHeure(m.debut)) && cleTitre(l[c.titre]) === cleTitre(titre);
-    const avant = lignes.filter((l) => memeSeance(l, m.titre));
-    const apres = m.apres.Titre ? lignes.filter((l) => memeSeance(l, m.apres.Titre)) : [];
-    const trouvees = avant.length ? avant : apres;
-    if (trouvees.length > 1) return { ...m, etat: 'ambigu' };
-    if (!trouvees.length) return { ...m, etat: 'introuvable' };
-    const [ligne] = trouvees;
-    if (champs.some((champ) => !(colonneDe(champ) in ligne))) return { ...m, etat: 'colonne-absente', id: ligne.id };
-    const cellules = {};
-    for (const champ of champs) {
-      const colonne = colonneDe(champ);
-      if (memeCellule(champ, ligne[colonne], m.apres[champ])) continue;   // déjà à jour
-      if (!memeCellule(champ, ligne[colonne], m.avant[champ])) return { ...m, etat: 'different', id: ligne.id };
-      // même forme que la cellule : liste de choix (['L', 'a', 'b']) ou texte « a, b »
-      cellules[colonne] = champ !== 'Cibles' ? m.apres[champ] : Array.isArray(ligne[colonne]) || ligne[colonne] == null ? ['L', ...m.apres[champ]] : m.apres[champ].join(', ');
-    }
-    return Object.keys(cellules).length ? { ...m, etat: 'a-faire', id: ligne.id, cellules } : { ...m, etat: 'deja-fait', id: ligne.id };
-  });
-}
-
-/**
- * Corrige en place les cellules de Evenements listées dans maj-planning.js, en une seule opération (tout ou rien). Cela demande de pouvoir
- * modifier les lignes de Evenements : pour les autres personnes, la tentative échoue sans bruit et rien ne change. Les lignes gardent leur
- * numéro, donc les présences de Participations restent sur leur séance. Une fois les corrections faites, il n'y a plus rien à écrire.
- */
-async function corrigerPlanning() {
-  if (!CONFIG.corrigerPlanning || etat.erreur) return;
-  try {
-    const table = CONFIG.tables.evenements;
-    const plan = planifierCorrections(lignesDeTable(await grist.docApi.fetchTable(table)));
-    const faire = plan.filter((p) => p.etat === 'a-faire');
-    const laissees = plan.filter((p) => !['a-faire', 'deja-fait'].includes(p.etat));   // séance introuvable, cellule retouchée à la main… : jamais forcées
-    if (laissees.length) console.info('Corrections du planning laissées de côté :', laissees.map((p) => `${p.jour} ${p.debut} ${p.etat}`));
-    if (!faire.length) return;
-    await grist.docApi.applyUserActions(faire.map((p) => ['UpdateRecord', table, p.id, p.cellules]));
-    alerter(`Planning mis à jour : ${nombre(faire.length, ['séance corrigée', 'séances corrigées'])} d’après le planning du 22 octobre (titres et publics). Les présences sont conservées.`
-      + (laissees.length ? ` ${nombre(laissees.length, ['correction laissée', 'corrections laissées'])} de côté (séance introuvable ou cellule déjà retouchée à la main).` : ''), 10000);
-    await chargerEvenements();
-  } catch (err) {
-    console.warn('Correction du planning impossible', err);
   }
 }
 
@@ -1680,8 +1619,6 @@ if (typeof grist === 'undefined' || (window.self === window.top && !grist.simule
   grist.onRecords(recevoirPresences, { includeColumns: 'all' });
   (async () => {
     await Promise.all([chargerEvenements(), chargerEtablissements(), preparerParticipations(), preparerDemandes()]);
-    const corrections = corrigerPlanning();   // en parallèle : le reste du chargement n'attend pas, sauf pour remplir une colonne « Cibles » à créer (d'après les titres corrigés)
-    if (!etat.colonneCibles) await corrections;
     await preparerCibles();
     await chargerAnnuaire();
     await verifierAcces();

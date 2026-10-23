@@ -11,7 +11,6 @@ HTML, CSS et JavaScript natifs : la seule dépendance est le script officiel `gr
 | `assets/fonts/` | la police Bitter (graisses 400 et 700, licence OFL jointe), servie avec le widget : aucun appel à un service extérieur |
 | `data/Evenements_Semaine_Innovation_2026.xlsx` | les 30 séances, à importer dans Grist |
 | `data/build_xlsx.py` | génère l’Excel (et les données de test) à partir de la liste des événements |
-| `maj-planning.js` | les cellules de `Evenements` changées par le planning du 22/10 : le widget les corrige en place dans un document déjà en service (voir « Mettre à jour les événements ») |
 | `dev/` | faux Grist pour tester dans un navigateur, scripts d’un vrai Grist local et batterie de tests (voir « Tests ») |
 | `package.json` | ne sert qu’aux tests (le widget n’a aucune dépendance) |
 
@@ -134,14 +133,13 @@ GitHub Pages : *Settings* → *Pages* → *Deploy from a branch* → `main`, dos
 
 ## Tests
 
-La batterie (`npm test`, soit `node --test dev/tests/*.test.js`) a trois étages (plus le test de la mise à jour du planning). Elle demande Node 22 et [Playwright](https://playwright.dev) (`npm install` dans le dépôt, ou `npm install --no-save playwright`) ; `CHROMIUM_PATH` indique un Chromium déjà installé. Le widget lui-même n’a aucune dépendance.
+La batterie (`npm test`, soit `node --test dev/tests/*.test.js`) a trois étages. Elle demande Node 22 et [Playwright](https://playwright.dev) (`npm install` dans le dépôt, ou `npm install --no-save playwright`) ; `CHROMIUM_PATH` indique un Chromium déjà installé. Le widget lui-même n’a aucune dépendance.
 
 | Étage | Fichier | Ce qu’il vérifie |
 | --- | --- | --- |
 | Unitaire | `dev/tests/unitaires.test.js` | les fonctions de `widget.js` (lecture des valeurs Grist, dates et heures, références `{ tableId, rowId }`, logos, établissements, participants, regroupements, liens de carte) et la politique de sécurité de `index.html` |
 | Faux Grist | `dev/tests/faux-grist.test.js` | l’écran dans un navigateur : jours, filtre, boutons de choix, compteurs, liste des participants, messages d’erreur, toutes les options `?…` ci-dessous |
 | Vrai Grist | `dev/tests/grist-reel.test.js` | le widget dans l’image officielle de Grist, avec plusieurs personnes connectées en même temps : première ouverture, enregistrement, doublons et lignes oubliées, mise à jour en direct, règles d’accès d’Antoine (attribut utilisateur `acl`) sans rechargement de la page, règles recommandées ci-dessus (impossible d’écrire à la place d’un autre), document ouvert à tout le monde (anonyme, personne hors Annuaire, membre non ajouté nommément), lecteur, personne absente de l’Annuaire, logos en pièces jointes, lien de carte, colonne `Email` masquée (aucune colonne en trop, aucune donnée perdue), politique de sécurité (CSP) active |
-| Mise à jour du planning | `dev/tests/maj-evenements.test.js` | le widget corrige en place les cellules de `Evenements` dans un vrai Grist : la table de la version du 13/10, avec des présences de trois personnes, devient exactement celle du 22/10, mêmes lignes, présences inchangées (pages ouvertes avant et après) ; éditrice sans droit : rien ne change, sans bruit ; cellule retouchée à la main laissée telle quelle ; colonne `Cibles` à créer ; contre-exemple de la réimportation (toutes les présences effacées) |
 
 L’étage « vrai Grist » est ignoré tant que Grist ne répond pas. Pour le lancer (Docker requis, image `gristlabs/grist`) :
 
@@ -161,8 +159,8 @@ puis ouvrir <http://localhost:8000/dev/>. Le faux Grist reprend la structure des
 ## Mettre à jour les événements
 Modifier la liste `EVENEMENTS` dans `data/build_xlsx.py` puis `python3 data/build_xlsx.py` (nécessite `openpyxl`), ou modifier directement la table `Evenements` dans Grist : le widget relit les événements chaque minute.
 
-**Dans un document déjà en service, ne jamais vider puis réimporter la table `Evenements`** : chaque présence de `Participations` pointe vers le numéro de ligne de son événement, et Grist remet à zéro les références vers une ligne supprimée (les choix de tout le monde disparaîtraient ; le test `maj-evenements` le montre). Corriger les cellules en place : une ligne existante garde son numéro, quel que soit ce qu’on change dedans, et un nouvel événement est une nouvelle ligne.
+**Dans un document déjà en service, ne jamais vider puis réimporter la table `Evenements`** : chaque présence de `Participations` pointe vers le numéro de ligne de son événement, et Grist remet à zéro les références vers une ligne supprimée (les choix de tout le monde disparaîtraient, et la réimportation ne les rétablit pas). Corriger les cellules en place : une ligne existante garde son numéro, quel que soit ce qu’on change dedans, et un nouvel événement est une nouvelle ligne. Une séance annulée ne se supprime pas sans prévenir les personnes qui l’avaient choisie : ses présences seraient effacées.
 
-Le widget peut le faire lui-même : `maj-planning.js` liste les cellules à corriger (séance reconnue par son jour, son début et son titre, valeur attendue avant, valeur écrite après). À l’ouverture par une personne qui peut modifier les lignes de `Evenements` (avec les règles d’accès d’Antoine : les propriétaires), il écrit ces cellules en un seul lot « tout ou rien » et affiche « Planning mis à jour… ». Pour les autres personnes l’écriture est refusée sans bruit et rien ne change. Une cellule retouchée à la main n’est jamais écrasée, aucune ligne n’est supprimée ni ajoutée, et une fois les corrections faites il n’y a plus rien à écrire. `corrigerPlanning: false` dans `CONFIG` les coupe. Une fois appliquées, ce code n’a plus d’utilité : le retirer (`corrigerPlanning` et `planifierCorrections` dans `widget.js`, `maj-planning.js`, sa balise dans `index.html`).
+La mise à jour du 22/10/2026 (cinq titres et deux publics) a été appliquée ainsi, en place, par le widget lui-même (version « q »), puis ce code a été retiré (version « r ») : il est dans l’historique de `main`, commit `fa248c6`, si une prochaine mise à jour demande la même chose (une liste de cellules « avant / après » reconnues par jour, début et titre, écrites en un seul lot par un propriétaire qui ouvre le widget, sans jamais écraser une cellule retouchée à la main).
 
 Sources : planning PDF « mise à jour 22-10 » (qui fait foi sur le site) et fiches de <https://www.u-bordeaux.fr/evenements/semaine-de-linnovation-2026-3e-edition>.

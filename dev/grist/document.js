@@ -47,11 +47,11 @@ const CHOIX_CIBLES = ['Pédagogie', 'Recherche', 'Étudiants', 'Entreprises', 'P
  * `cibles: false` : une table Evenements sans la colonne « Cibles », comme avant son ajout.
  * `choixCibles` : les choix déclarés dans la colonne (par exemple les quatre premiers seulement : les valeurs « Personnels » collées
  * depuis le tableur restent alors dans les cellules, hors liste de choix).
- * `liste` : les événements à mettre dans la table (par défaut ceux de dev/evenements.js), par exemple ceux d'une version précédente de l'Excel.
  */
-async function creerDocument(nom = 'Semaine de l’innovation (test)', { widget = WIDGET, acces = 'full', cibles = true, choixCibles = CHOIX_CIBLES, liste = evenements() } = {}) {
+async function creerDocument(nom = 'Semaine de l’innovation (test)', { widget = WIDGET, acces = 'full', cibles = true, choixCibles = CHOIX_CIBLES } = {}) {
   const [{ id: espace }] = await api(PROPRIETAIRE, 'GET', '/orgs/current/workspaces');
   const doc = await api(PROPRIETAIRE, 'POST', `/workspaces/${espace}/docs`, { name: nom });
+  const liste = evenements();
   const cles = ['Debut', 'Fin', 'Titre', 'Sous_titre', 'Type', 'Temps_fort', 'Lieu', 'Ville', 'Adresse', 'Public', 'Description', 'Lien'];
   await appliquer(PROPRIETAIRE, doc, [
     ['AddTable', 'Annuaire', colonnes(['nom', 'prenom', 'Etablissement', 'email', 'Fonction', 'nom_de_domaine', 'email_affiche'])],
