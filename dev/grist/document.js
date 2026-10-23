@@ -54,7 +54,7 @@ async function creerDocument(nom = 'Semaine de l’innovation (test)', { widget 
   const liste = evenements();
   const cles = ['Debut', 'Fin', 'Titre', 'Sous_titre', 'Type', 'Temps_fort', 'Lieu', 'Ville', 'Adresse', 'Public', 'Description', 'Lien'];
   await appliquer(PROPRIETAIRE, doc, [
-    ['AddTable', 'Annuaire', colonnes(['nom', 'prenom', 'Etablissement', 'email', 'Fonction', 'nom_de_domaine', 'email_affiche'])],
+    ['AddTable', 'Annuaire', [...colonnes(['nom', 'prenom', 'Etablissement', 'email', 'Fonction', 'nom_de_domaine', 'email_affiche', 'id_sync']), { id: 'Avatar', type: 'Attachments', isFormula: false }]],
     ['AddTable', 'Etablissement', [...colonnes(['Nom_complet', 'Acronyme', 'nom_de_domaine', 'alt_domain']), { id: 'Logo', type: 'Attachments', isFormula: false }]],
     ['AddTable', 'Evenements', [{ id: 'Jour', type: 'Date', isFormula: false }, ...colonnes(cles),
       ...(cibles ? [{ id: 'Cibles', type: 'ChoiceList', isFormula: false, widgetOptions: JSON.stringify({ choices: choixCibles }) }] : [])]],
@@ -137,26 +137,34 @@ async function installerReglesRecommandees(doc) {
 
 module.exports.installerReglesRecommandees = installerReglesRecommandees;
 
+/** Colonnes de l'Annuaire dont le widget n'a pas besoin : réservées aux propriétaires. */
+const COLONNES_ANNUAIRE_FERMEES = 'email,Fonction,email_affiche,id_sync,Avatar';
+
 /**
  * Document partagé en édition à « toute personne disposant du lien » (README, « Partager sans ajouter chaque personne ») : les règles
- * recommandées, plus l'attribut « acl » et trois règles qui réservent l'Annuaire et l'écriture dans Participations aux personnes
- * de l'Annuaire. Une personne anonyme ou absente de l'Annuaire lit le planning mais ne voit ni les personnes, ni les e-mails, et n'écrit rien.
+ * recommandées, plus l'attribut « acl » et les règles qui donnent à chacun le strict minimum (audit des tables visibles du 23/10/2026) :
+ *  - personne anonyme : Evenements et Participations (sans Email ni Utilisateur) ;
+ *  - connectée mais hors Annuaire : en plus Etablissement (le widget y cherche son établissement), et elle crée sa ligne de l'Annuaire et ses demandes ;
+ *  - personne de l'Annuaire : Evenements, Etablissement, Participations (ses lignes en écriture) et l'Annuaire (nom, prénom, établissement, domaine) ;
+ *    ni Demandes_Annuaire, ni les journaux, ni les e-mails des autres ;
+ *  - toute autre table, structure comprise : propriétaires seulement.
  * `user.acl.id == 0` ne convient pas : l'identifiant vaut None quand aucune ligne ne correspond.
  */
 async function installerReglesPartagePublic(doc) {
-  const [defaut, colonnes, annuaire, etablissement, evenements, participations, demandes] = await appliquer(PROPRIETAIRE, doc, [['*', '*'], ['Participations', 'Email,Utilisateur'], ['Annuaire', '*'],
-    ['Etablissement', '*'], ['Evenements', '*'], ['Participations', '*'], ['Demandes_Annuaire', '*']].map(([tableId, colIds]) => ['AddRecord', '_grist_ACLResources', null, { tableId, colIds }]));
+  const [defaut, colonnes, colonnesAnnuaire, annuaire, etablissement, evenements, participations, demandes] = await appliquer(PROPRIETAIRE, doc, [['*', '*'], ['Participations', 'Email,Utilisateur'], ['Annuaire', COLONNES_ANNUAIRE_FERMEES],
+    ['Annuaire', '*'], ['Etablissement', '*'], ['Evenements', '*'], ['Participations', '*'], ['Demandes_Annuaire', '*']].map(([tableId, colIds]) => ['AddRecord', '_grist_ACLResources', null, { tableId, colIds }]));
   const regle = (resource, aclFormula, permissionsText, memo = '') => ({ resource, aclFormula, permissionsText, memo });
   const horsAnnuaire = 'user.Access not in [OWNER] and not user.acl.id';
   const rules = [
     { resource: defaut, userAttributes: JSON.stringify({ name: 'acl', tableId: 'Annuaire', lookupColId: 'email', charId: 'Email' }), aclFormula: '', permissionsText: '', memo: '' },
     regle(colonnes, horsAnnuaire, '-R'),
+    regle(colonnesAnnuaire, 'user.Access not in [OWNER]', '-R'),
     // Annuaire : une personne connectée, pas encore dans l'Annuaire, peut y créer sa propre ligne (une seule : ensuite elle y est) ; rien d'autre
     regle(annuaire, 'user.Access in [OWNER]', '+R+U+C+D'),
     regle(annuaire, 'user.IsLoggedIn and not user.acl.id and newRec.email == user.Email', '+C'),
     regle(annuaire, horsAnnuaire, '-R-U-C-D'),
     regle(annuaire, '', '+R-U-C-D'),
-    regle(etablissement, 'user.Access in [OWNER]', '+R+U+C+D'), regle(etablissement, '', '+R-U-C-D'),
+    regle(etablissement, 'user.Access in [OWNER]', '+R+U+C+D'), regle(etablissement, 'not user.IsLoggedIn', '-R-U-C-D'), regle(etablissement, '', '+R-U-C-D'),
     regle(evenements, 'user.Access in [OWNER]', '+R+U+C+D'), regle(evenements, '', '+R-U-C-D'),
     regle(participations, 'user.Access in [OWNER]', '+R+U+C+D'),
     regle(participations, horsAnnuaire, '-U-C-D'),
@@ -164,8 +172,9 @@ async function installerReglesPartagePublic(doc) {
     regle(participations, 'rec.Email == user.Email', '+D'),
     regle(participations, 'newRec.Email == user.Email', '+C'),
     regle(participations, '', '+R-U-C-D'),
-    // Demandes d'ajout : une personne connectée écrit ses propres demandes (son e-mail de connexion, ajouté par Grist) et ne lit que les siennes
+    // Demandes d'ajout : une personne connectée, pas encore dans l'Annuaire, écrit ses propres demandes (son e-mail de connexion, ajouté par Grist) et ne lit que les siennes ; une fois dans l'Annuaire, elle n'a plus rien à y voir
     regle(demandes, 'user.Access in [OWNER]', '+R+U+C+D'),
+    regle(demandes, 'user.Access not in [OWNER] and user.acl.id', '-R-U-C-D'),
     regle(demandes, 'user.IsLoggedIn and newRec.Email == user.Email', '+C'),
     regle(demandes, 'user.IsLoggedIn and rec.Email == user.Email', '+R+D'),
     regle(demandes, '', '-R-U-C-D'),
@@ -177,6 +186,71 @@ async function installerReglesPartagePublic(doc) {
 }
 
 module.exports.installerReglesPartagePublic = installerReglesPartagePublic;
+
+/**
+ * Les règles du document d'Antoine telles qu'elles étaient le 23/10/2026 (captures de sa page « Permissions avancées ») : celles du README
+ * pour le partage public, sauf les journaux de synchro (réservés à qui n'est pas « hors Annuaire », donc ouverts à toute personne de l'Annuaire),
+ * aucune règle propre aux colonnes de l'Annuaire et aucune règle pour les autres tables. Les journaux et Demandes_Annuaire doivent exister.
+ */
+async function installerReglesAntoineActuelles(doc) {
+  const [defaut, colonnes, annuaire, etablissement, evenements, participations, demandes, journalE, journalM] = await appliquer(PROPRIETAIRE, doc, [['*', '*'], ['Participations', 'Email,Utilisateur'], ['Annuaire', '*'],
+    ['Etablissement', '*'], ['Evenements', '*'], ['Participations', '*'], ['Demandes_Annuaire', '*'], ['Journal_Etablissements', '*'], ['Journal_Membres_Espaces_Resana', '*']]
+    .map(([tableId, colIds]) => ['AddRecord', '_grist_ACLResources', null, { tableId, colIds }]));
+  const regle = (resource, aclFormula, permissionsText, memo = '') => ({ resource, aclFormula, permissionsText, memo });
+  const horsAnnuaire = 'user.Access not in [OWNER] and not user.acl.id';
+  const rules = [
+    { resource: defaut, userAttributes: JSON.stringify({ name: 'acl', tableId: 'Annuaire', lookupColId: 'email', charId: 'Email' }), aclFormula: '', permissionsText: '', memo: '' },
+    regle(annuaire, 'user.Access in [OWNER]', '+R+U+C+D'),
+    regle(annuaire, 'user.IsLoggedIn and not user.acl.id and newRec.email == user.Email', '+C'),
+    regle(annuaire, horsAnnuaire, '-R-U-C-D', 'Vous ne pouvez pas voir l\'annuaire si vous n\'etes pas dedans'),
+    regle(annuaire, '', '+R-U-C-D'),
+    regle(demandes, 'user.Access in [OWNER]', '+R+U+C+D'),
+    regle(demandes, 'user.IsLoggedIn and newRec.Email == user.Email', '+C'),
+    regle(demandes, 'user.IsLoggedIn and rec.Email == user.Email', '+R+D'),
+    regle(demandes, '', '-R-U-C-D'),
+    regle(etablissement, 'user.Access in [OWNER]', '+R+U+C+D'), regle(etablissement, '', '+R-U-C-D'),
+    regle(evenements, 'user.Access in [OWNER]', '+R+U+C+D'), regle(evenements, '', '+R-U-C-D'),
+    regle(journalE, 'user.Access == VIEWER', '-R', 'Synchro : journaux réservés aux éditeurs'), regle(journalE, horsAnnuaire, '-R-U-C-D'),
+    regle(journalM, 'user.Access == VIEWER', '-R', 'Synchro : journaux réservés aux éditeurs'), regle(journalM, horsAnnuaire, '-R-U-C-D'),
+    regle(colonnes, horsAnnuaire, '-R'),
+    regle(participations, 'user.Access in [OWNER]', '+R+U+C+D'),
+    regle(participations, horsAnnuaire, '-U-C-D'),
+    regle(participations, 'rec.Email == user.Email and newRec.Email == user.Email', '+U'),
+    regle(participations, 'rec.Email == user.Email', '+D'),
+    regle(participations, 'newRec.Email == user.Email', '+C'),
+    regle(participations, '', '+R-U-C-D'),
+  ].map((r, i) => ({ ...r, rulePos: i + 1 }));
+  await appliquer(PROPRIETAIRE, doc, rules.map((r) => ['AddRecord', '_grist_ACLRules', null, r]));
+}
+
+module.exports.installerReglesAntoineActuelles = installerReglesAntoineActuelles;
+
+/**
+ * Les changements du guide « Qui voit quelle table » appliqués aux règles d'Antoine du 23/10 (installerReglesAntoineActuelles), dans l'ordre du guide :
+ * 1. colonnes de l'Annuaire fermées ; 2. Demandes_Annuaire fermée aux personnes de l'Annuaire ; 3. Etablissement fermé aux personnes non connectées ;
+ * 4. règle des autres tables (journaux compris) et structure. Les règles propres aux journaux restent en place.
+ */
+async function appliquerChangementsGuide(doc) {
+  const ressources = (await api(PROPRIETAIRE, 'GET', `/docs/${doc}/tables/_grist_ACLResources/records`)).records;
+  const regles = (await api(PROPRIETAIRE, 'GET', `/docs/${doc}/tables/_grist_ACLRules/records`)).records;
+  const ressource = (tableId, colIds) => ressources.find((r) => r.fields.tableId === tableId && r.fields.colIds === colIds).id;
+  const premiere = (resource) => Math.min(...regles.filter((r) => r.fields.resource === resource).map((r) => r.fields.rulePos));
+  const apresLaPremiere = (resource) => premiere(resource) + 0.5;   // « + » sur la règle des propriétaires : la nouvelle ligne se glisse juste dessous
+  const [colonnes] = await appliquer(PROPRIETAIRE, doc, [['AddRecord', '_grist_ACLResources', null, { tableId: 'Annuaire', colIds: COLONNES_ANNUAIRE_FERMEES }]]);
+  const fin = Math.max(...regles.map((r) => r.fields.rulePos)) + 1;
+  const demandes = ressource('Demandes_Annuaire', '*');
+  const etablissement = ressource('Etablissement', '*');
+  const defautId = ressources.find((r) => r.fields.tableId === '*').id;
+  await appliquer(PROPRIETAIRE, doc, [
+    ['AddRecord', '_grist_ACLRules', null, { resource: colonnes, aclFormula: 'user.Access not in [OWNER]', permissionsText: '-R', memo: '', rulePos: 0 }],
+    ['AddRecord', '_grist_ACLRules', null, { resource: demandes, aclFormula: 'user.Access not in [OWNER] and user.acl.id', permissionsText: '-R-U-C-D', memo: '', rulePos: apresLaPremiere(demandes) }],
+    ['AddRecord', '_grist_ACLRules', null, { resource: etablissement, aclFormula: 'not user.IsLoggedIn', permissionsText: '-R-U-C-D', memo: '', rulePos: apresLaPremiere(etablissement) }],
+    ['AddRecord', '_grist_ACLRules', null, { resource: defautId, aclFormula: 'user.Access not in [OWNER]', permissionsText: '-R-U-C-D', memo: '', rulePos: fin }],
+    ['AddRecord', '_grist_ACLRules', null, { resource: defautId, aclFormula: 'user.Access != OWNER', permissionsText: '-S', memo: '', rulePos: fin + 1 }],
+  ]);
+}
+
+module.exports.appliquerChangementsGuide = appliquerChangementsGuide;
 
 /** Donne un logo (pièce jointe Grist) aux deux premiers établissements : le logo de la Semaine de l'innovation. */
 async function ajouterLogos(doc) {

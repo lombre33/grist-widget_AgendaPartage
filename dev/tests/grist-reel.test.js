@@ -7,7 +7,7 @@ const { describe, test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { serveur, lancerNavigateur, attendre, pause, SEL } = require('./helpers');
 const { GRIST, PROPRIETAIRE, scriptApiReel, api, appliquer, lignes, partager, contexteNavigateur } = require('../grist/lib');
-const { creerDocument, installerReglesAntoine, installerReglesRecommandees, installerReglesPartagePublic, ajouterLogos, supprimerDocument, evenements } = require('../grist/document');
+const { creerDocument, installerReglesAntoine, installerReglesAntoineActuelles, appliquerChangementsGuide, installerReglesRecommandees, installerReglesPartagePublic, ajouterLogos, supprimerDocument, evenements } = require('../grist/document');
 
 const PROPRIO = PROPRIETAIRE;
 const JEANNE = 'jeanne.delmas@u-bordeaux.fr';
@@ -919,6 +919,98 @@ describe('vrai Grist', { skip: disponible ? false : `Grist ne répond pas sur ${
       await pause(1500);
       assert.equal((await colonnes(doc)).Email.recalcWhen, 1, 'la colonne n\'a pas été recréée');
       assert.deepEqual(sansEcho(await participations(PROPRIO, doc)), avant, 'l\'e-mail de la présence est toujours là');
+    });
+  });
+
+  describe('audit : quelle personne voit quelle table (document ouvert à tout le monde, avec les journaux de synchro et une table ajoutée plus tard)', () => {
+    const TABLES = ['Evenements', 'Etablissement', 'Participations', 'Annuaire', 'Demandes_Annuaire', 'Journal_Etablissements', 'Journal_Membres_Espaces_Resana', 'Brouillon'];
+    const PROFILS = [['anonyme', null], ['connectee_hors_annuaire', INCONNU], ['personne_de_l_annuaire', JEANNE], ['proprietaire', PROPRIO]];
+
+    /** Un document comme celui d'Antoine : les tables du widget, les deux journaux de synchro et une table « ajoutée plus tard », partagé à tout le monde en édition. */
+    async function documentAvecJournaux(installer) {
+      const doc = await nouveau();
+      const colonnesJournal = ['Synchro_Export', 'Sync_Par', 'Synchro_Donnees'].map((id) => ({ id, type: 'Text', isFormula: false }));
+      await appliquer(PROPRIO, doc.doc, [
+        ['AddTable', 'Journal_Etablissements', colonnesJournal], ['AddTable', 'Journal_Membres_Espaces_Resana', colonnesJournal],
+        ['AddTable', 'Brouillon', [{ id: 'A', type: 'Text', isFormula: false }]],
+      ]);
+      await appliquer(PROPRIO, doc.doc, ['Journal_Etablissements', 'Journal_Membres_Espaces_Resana', 'Brouillon'].map((t) => ['AddRecord', t, null, { [t === 'Brouillon' ? 'A' : 'Synchro_Donnees']: 'secret' }]));
+      await installer(doc.doc);
+      const retraits = Object.fromEntries(doc.emails.slice(1).map((email) => [email, null]));
+      await api(PROPRIO, 'PATCH', `/docs/${doc.doc}/access`, { delta: { users: { ...retraits, 'everyone@getgrist.com': 'editors' } } });
+      return doc;
+    }
+
+    /** Ce qu'une personne voit : tables listées, colonnes lues, nombre de lignes lisibles, et si elle peut y ajouter une ligne. */
+    async function inventaire(utilisateur, doc) {
+      const appel = async (methode, chemin, corps) => {
+        if (utilisateur) {
+          try { return { statut: 200, corps: await api(utilisateur, methode, chemin, corps) }; } catch (err) { return { statut: Number((err.message.match(/→ (\d+)/) || [])[1]) || 0, corps: null }; }
+        }
+        const r = await fetch(`${GRIST}/api${chemin}`, { method: methode, headers: { 'X-Requested-With': 'XMLHttpRequest', ...(corps ? { 'Content-Type': 'application/json' } : {}) }, body: corps ? JSON.stringify(corps) : undefined });
+        return { statut: r.status, corps: r.ok ? await r.json() : null };
+      };
+      const liste = await appel('GET', `/docs/${doc.doc}/tables`);
+      const listees = liste.statut === 200 ? liste.corps.tables.map((t) => t.id) : [];
+      const sortie = { listees: TABLES.filter((t) => listees.includes(t)), tables: {} };
+      for (const table of TABLES) {
+        const lues = await appel('GET', `/docs/${doc.doc}/tables/${table}/records`);
+        const lignes = lues.statut === 200 ? lues.corps.records : [];
+        const ajout = await appel('POST', `/docs/${doc.doc}/tables/${table}/records`, { records: [{ fields: {} }] });
+        if (ajout.statut === 200) await appliquer(PROPRIO, doc.doc, [['BulkRemoveRecord', table, ajout.corps.records.map((r) => r.id)]]);
+        sortie.tables[table] = { lecture: lues.statut, lignes: lignes.length, colonnes: [...new Set(lignes.flatMap((l) => Object.keys(l.fields)))].sort(), ajout: ajout.statut };
+        if (table === 'Annuaire') sortie.tables[table].personnes = lignes.map((l) => ({ nom: l.fields.nom, email: l.fields.email || null, fonction: l.fields.Fonction || null }));
+      }
+      return sortie;
+    }
+
+    const enregistrer = (nom, valeur) => { if (process.env.AUDIT_SORTIE) require('node:fs').writeFileSync(`${process.env.AUDIT_SORTIE}/${nom}.json`, JSON.stringify(valeur, null, 1)); };
+
+    test('règles d\'Antoine du 23/10 : inventaire', async () => {
+      const doc = await documentAvecJournaux(installerReglesAntoineActuelles);
+      const resultat = {};
+      for (const [nom, utilisateur] of PROFILS) resultat[nom] = await inventaire(utilisateur, doc);
+      enregistrer('actuelles', resultat);
+    });
+
+    /** Ce que doit voir et pouvoir écrire chaque personne avec les règles « strict minimum » : [lecture 200/403, lignes lues > 0, ajout 200/403] par table. */
+    const attendu = {
+      anonyme: { listees: ['Evenements', 'Participations'], Evenements: [200, 403], Participations: [200, 403] },
+      connectee_hors_annuaire: { listees: ['Evenements', 'Etablissement', 'Participations', 'Demandes_Annuaire'], Evenements: [200, 403], Etablissement: [200, 403], Participations: [200, 403], Demandes_Annuaire: [200, 200] },
+      personne_de_l_annuaire: { listees: ['Evenements', 'Etablissement', 'Participations', 'Annuaire'], Evenements: [200, 403], Etablissement: [200, 403], Participations: [200, 200], Annuaire: [200, 403] },
+    };
+    const verifierInventaire = (resultat) => {
+      for (const [profil, voulu] of Object.entries(attendu)) {
+        const vu = resultat[profil];
+        assert.deepEqual(vu.listees, voulu.listees, `${profil} : tables listées`);
+        for (const table of TABLES) {
+          const [lecture, ajout] = voulu[table] || [403, 403];
+          assert.deepEqual([vu.tables[table].lecture, vu.tables[table].ajout], [lecture, ajout], `${profil} : ${table} (lecture, ajout)`);
+        }
+      }
+      // l'Annuaire d'une personne qui y figure : noms, prénoms et établissements de tous ; ni e-mail, ni fonction, ni avatar, ni identifiant de synchro
+      const annuaire = resultat.personne_de_l_annuaire.tables.Annuaire;
+      assert.equal(annuaire.lignes, 7);
+      assert.deepEqual(annuaire.colonnes, ['Etablissement', 'nom', 'nom_de_domaine', 'prenom']);
+      const proprio = resultat.proprietaire;
+      assert.deepEqual(proprio.listees, TABLES, 'le propriétaire voit tout');
+      assert.ok(proprio.tables.Annuaire.personnes.every((p) => p.email && p.fonction), 'le propriétaire lit les e-mails');
+    };
+
+    test('règles « strict minimum » du README : inventaire', async () => {
+      const doc = await documentAvecJournaux(installerReglesPartagePublic);
+      const resultat = {};
+      for (const [nom, utilisateur] of PROFILS) resultat[nom] = await inventaire(utilisateur, doc);
+      enregistrer('minimales', resultat);
+      verifierInventaire(resultat);
+    });
+
+    test('règles d\'Antoine du 23/10 + les changements du guide (dans l\'ordre) : même résultat que les règles du README', async () => {
+      const doc = await documentAvecJournaux(async (id) => { await installerReglesAntoineActuelles(id); await appliquerChangementsGuide(id); });
+      const resultat = {};
+      for (const [nom, utilisateur] of PROFILS) resultat[nom] = await inventaire(utilisateur, doc);
+      enregistrer('apres_guide', resultat);
+      verifierInventaire(resultat);
     });
   });
 });
