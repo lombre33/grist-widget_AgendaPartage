@@ -101,6 +101,7 @@ const LIBELLES = {
 /* Les textes qui citent « Présent » / « À confirmer », la présence ou l’Annuaire : les seuls qu’une variante remplace (voir VARIANTES). */
 const TEXTES = {
   legende: null,   // légende des colonnes étroites ; null : celle de index.html
+  tableLiee: null,   // message si le widget est lié à une autre table que celle des présences ; null : pas de vérification (version courante)
   lectureSeule: 'Le planning est en lecture seule. Pour indiquer votre présence, connectez-vous à Grist avec votre adresse professionnelle : elle doit figurer dans l’annuaire du document.',
   nonReconnu: 'Vous n’êtes pas reconnu(e) : connectez-vous avec votre compte pour indiquer votre présence.',
   horsAnnuaire: (email, table) => `Votre adresse de connexion (${email}) n’est pas dans la table « ${table} » : demandez à y être ajouté(e) pour indiquer votre présence.`,
@@ -153,6 +154,7 @@ const VARIANTES = {
       etapeCocher: ['Revenez ici et cochez', 'Le planning vous reconnaît : le bouton « Assure la communication » apparaît sur chaque événement.'],
       illustrationCocher: 'cocherUn',
       noteConnexion: '',
+      tableLiee: (liee, attendue) => `Ce widget est lié à la table « ${liee} » au lieu de « ${attendue} » : vos choix s’enregistrent, mais ils ne s’afficheront pas au retour sur la page. Dans le panneau de droite de Grist, onglet « Données source », choisissez « ${attendue} ».`,
       inscription: {
         faite: 'Bienvenue ! Vous êtes inscrit(e) : le planning se recharge, vous pourrez ensuite indiquer les événements dont vous assurez la communication.',
         refusee: 'Votre demande est enregistrée : l’organisateur vous inscrit dès que possible, vous pourrez alors indiquer les événements dont vous assurez la communication.',
@@ -190,6 +192,8 @@ if (VARIANTE_CONNUE) {
   // `&page=N` dans l’adresse du widget. Sans lui, Grist la ramène à la première page du document (ce ne serait pas la bonne : la page de la version courante).
   const numeroPage = new URLSearchParams(location.search).get('page') || '';
   CONFIG.connexion.retour = /^\d{1,5}$/.test(numeroPage) ? `/{doc}/Semaine-de-linnovation-2026/p/${numeroPage}?style=singlePage` : '';
+  // Repère pour style.css : les règles propres à une variante s’y accrochent (aucune n’existe pour la version courante, qui n’a pas cet attribut).
+  document.documentElement.dataset.variante = VARIANTE_DEMANDEE;
 }
 const VARIANTE_INCONNUE = VARIANTE_DEMANDEE !== null && !VARIANTE_CONNUE;
 
@@ -205,7 +209,7 @@ const CIBLES = [
 ];
 
 /* Numéro de version, affiché en bas de page : il permet de vérifier quelle version Grist a chargée (cache du navigateur). */
-const VERSION = `2026-11-03 · w${VARIANTE_CONNUE ? ` · ${VARIANTE_DEMANDEE}` : ''}`;
+const VERSION = `2026-11-03 · w${VARIANTE_CONNUE ? ` · ${VARIANTE_DEMANDEE} 3` : ''}`;
 
 const JOURS_SEMAINE = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
 const MOIS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
@@ -227,6 +231,7 @@ const etat = {
   moi: null,                   // { id, nom, prenom, logo } : ma ligne dans l’Annuaire
   messageMoi: '',              // pourquoi moi est vide (mode lecture seule)
   erreurColonnes: '',          // colonnes de Participations absentes et impossibles à créer
+  erreurTableLiee: '',         // variante : le widget est lié à une autre table que celle des présences (les présences relues seraient celles d’une autre table)
   erreur: '',                  // problème de lecture de la table Evenements
   colonneCibles: true,         // la table Evenements a une colonne « Cibles » (sinon le widget essaie de la créer)
   pret: false,                 // vrai dès que le premier chargement est terminé
@@ -707,6 +712,24 @@ function recevoirPresences(enregistrements) {
   rendre();
 }
 
+/**
+ * Les présences arrivent en direct de la table à laquelle Grist a lié le widget (`onRecords`), alors que le widget écrit dans la table de CONFIG.participations.
+ * Si ce n'est pas la même (widget ajouté sur une autre table), les choix s'écrivent mais ne reviennent jamais à l'affichage : on le dit.
+ * Seule la variante le vérifie (`TEXTES.tableLiee`) ; la version courante garde son fonctionnement.
+ */
+async function verifierTableLiee() {
+  if (!TEXTES.tableLiee) return;
+  try {
+    const liee = await Promise.race([grist.getSelectedTableId(), new Promise((resolve) => setTimeout(() => resolve(null), 10000))]);
+    if (liee && liee !== CONFIG.participations.table) {
+      etat.erreurTableLiee = TEXTES.tableLiee(liee, CONFIG.participations.table);
+      rendre();
+    }
+  } catch (err) {
+    console.warn('Table liée au widget inconnue', err);
+  }
+}
+
 /** Lit l’Annuaire (noms, prénoms, établissements). */
 async function chargerAnnuaire() {
   try {
@@ -1172,12 +1195,12 @@ function rendrePlanning(jours) {
 
 function rendre() {
   if (!etat.pret) return;   // le premier affichage attend la fin du premier chargement
-  const technique = etat.erreurColonnes || etat.erreur || (!etat.moi && !etat.inscrit && etat.messageMoi) || '';
-  const inscription = !(etat.erreurColonnes || etat.erreur) && messageInscription();
+  const technique = etat.erreurColonnes || etat.erreur || etat.erreurTableLiee || (!etat.moi && !etat.inscrit && etat.messageMoi) || '';
+  const inscription = !(etat.erreurColonnes || etat.erreur || etat.erreurTableLiee) && messageInscription();
   if (inscription) afficherMessage(inscription.texte, inscription.erreur);
   else if (technique) {
     const { texte: simple, detail } = messageSimple(technique);
-    afficherMessage(simple, Boolean(etat.erreurColonnes || etat.erreur), detail);
+    afficherMessage(simple, Boolean(etat.erreurColonnes || etat.erreur || etat.erreurTableLiee), detail);
   } else if (!etat.evenements.length) afficherMessage('Aucun événement à afficher.');
   else afficherMessage('');
   el('planning').removeAttribute('aria-busy');
@@ -1817,6 +1840,7 @@ if (VARIANTE_INCONNUE) {
   relireChoixCibles();
   grist.ready({ requiredAccess: 'full' });
   grist.onRecords(recevoirPresences, { includeColumns: 'all' });
+  verifierTableLiee();   // sans attendre : ne retarde jamais le premier affichage
   (async () => {
     await Promise.all([chargerEvenements(), chargerEtablissements(), CONFIG.annuaireACreer ? preparerAnnuaire().then(preparerParticipations) : preparerParticipations(), preparerDemandes()]);
     await preparerCibles();

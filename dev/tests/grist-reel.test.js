@@ -927,8 +927,8 @@ describe('vrai Grist', { skip: disponible ? false : `Grist ne répond pas sur ${
     const DOMINIQUE = 'dominique.garcia@exemple.org';
 
     /** Un document partagé à tout le monde (règles du README), avec la page des communicant·es ; le propriétaire l'ouvre (le widget crée les tables), puis les règles jumelles. */
-    async function documentCommunicants({ regles = true, logos = false } = {}) {
-      const doc = await nouveau({ publique: true, logos });
+    async function documentCommunicants({ regles = true, logos = false, base = { publique: true } } = {}) {
+      const doc = await nouveau({ ...base, logos });
       Object.assign(doc, await ajouterCommunicants(doc.doc, `${srv.url}/index.html`));
       const { page } = await ouvrir(PROPRIO, com(doc));
       await page.context().close();
@@ -964,6 +964,39 @@ describe('vrai Grist', { skip: disponible ? false : `Grist ne répond pas sur ${
       assert.deepEqual(await sansLaTrace(doc), avant, 'Annuaire, Participations et Demandes_Annuaire n\'ont pas bougé');
       assert.equal(await widget.locator('button[data-action="choisir"]').first().innerText(), '✓ Assure la communication');
       assert.equal((await presences(PROPRIO, doc)).length, 0, 'la ligne de connexion est supprimée');
+      assert.deepEqual(page.erreurs, []);
+    });
+
+    for (const [nom, base] of [['partage public', { publique: true }], ['règles d\'Antoine', { regles: true }], ['règles recommandées', { recommandees: true }], ['aucune règle', {}]]) test(`le propriétaire coche, change de page de Grist et revient : sa présence est toujours là (communicants sans règle ; ${nom})`, async () => {
+      const doc = await documentCommunicants({ regles: false, base });
+      const premiere = await ouvrir(PROPRIO, com(doc));
+      const bouton = carte(premiere.widget, 'Atelier Durable').locator('button[data-action="choisir"]');
+      await bouton.click();
+      await attendre(async () => (await presences(PROPRIO, doc)).length === 1, { message: 'la présence n\'est pas écrite' });
+      const [p] = await presences(PROPRIO, doc);
+      const moi = (await inscrits(PROPRIO, doc)).find((l) => l.email === PROPRIO);
+      assert.ok(moi, 'le propriétaire est inscrit dans Communicants_Inscrits');
+      assert.equal(p.Email, PROPRIO);
+      assert.equal(p.Utilisateur, moi.id, 'la présence est liée à sa fiche');
+      await premiere.page.context().close();   // changer de page dans Grist détruit le cadre du widget : on le recharge
+      const retour = await ouvrir(PROPRIO, com(doc));
+      assert.equal(await carte(retour.widget, 'Atelier Durable').locator('button[data-action="choisir"]').getAttribute('aria-pressed'), 'true', 'le choix a disparu au retour');
+      assert.deepEqual(await comptes(retour.widget, 'Atelier Durable'), [1, 0]);
+      assert.deepEqual(retour.page.erreurs, []);
+    });
+
+    test('widget ajouté sur la mauvaise table (comme chez Antoine, le 03/11) : les choix s\'écrivent dans Communicants_Participations mais ne reviennent pas ; le widget le dit', async () => {
+      const doc = await documentCommunicants({ regles: false });
+      const autre = await ajouterCommunicants(doc.doc, `${srv.url}/index.html`, 'Communicants_Semaine_Innovations_2026');
+      const { page, widget } = await ouvrir(PROPRIO, { doc: doc.doc, page: autre.pageCom });
+      await attendre(async () => /lié à la table « Communicants_Semaine_Innovations_2026 » au lieu de « Communicants_Participations »/.test(await widget.locator(SEL.etat).innerText()), { delai: 20000, message: 'aucun message sur la mauvaise table' });
+      assert.match(await widget.locator(SEL.etat).innerText(), /Données source/);
+      await carte(widget, 'Atelier Durable').locator('button[data-action="choisir"]').click();
+      await attendre(async () => (await presences(PROPRIO, doc)).length === 1, { message: 'la présence n\'est pas écrite dans Communicants_Participations' });
+      // la bonne page ne dit rien
+      const bonne = await ouvrir(PROPRIO, com(doc));
+      assert.equal(await bonne.widget.locator(SEL.etat).innerText(), '');
+      assert.equal(await carte(bonne.widget, 'Atelier Durable').locator('button[data-action="choisir"]').getAttribute('aria-pressed'), 'true');
       assert.deepEqual(page.erreurs, []);
     });
 

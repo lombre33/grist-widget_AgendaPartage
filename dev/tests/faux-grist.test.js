@@ -872,10 +872,53 @@ describe('variante « communicants »', () => {
     assert.equal(await page.locator('.legende').textContent(), '✓ assure la communication');
     assert.equal(await page.locator(SEL.filtre).getAttribute('title'), 'Ne garder que les événements dont vous assurez la communication');
     assert.match(await carte(page, 'Les Evolutive Learning').locator('.choix').getAttribute('aria-label'), /^Communication : Les Evolutive/);
-    assert.match(await page.locator(SEL.pied).innerText(), /^Version \S+ · \S+ · communicants · \d+ lignes? dans « Communicants_Participations »$/);
+    assert.match(await page.locator(SEL.pied).innerText(), /^Version \S+ · \S+ · communicants \d+ · \d+ lignes? dans « Communicants_Participations »$/);
     const corps = await page.locator('body').innerText();
     assert.doesNotMatch(corps, /À confirmer|à confirmer|Présent\b/, 'aucun libellé de la version courante');
     assert.equal(await page.locator(SEL.evenement).count(), 30, 'le même planning');
+    aucuneErreur(page);
+  });
+
+  for (const largeur of [320, 390, 560, 820, 1000, 1100, 1200, 1400, 1800]) {
+    test(`la liste des participants reste dans la carte à ${largeur} px (le badge « Assure la communication » est long)`, async () => {
+      const page = await ouvrir({ requete: V, largeur, hauteur: 900 });
+      await page.locator(`${SEL.ligneParticipants}:visible`).first().click();
+      const mesures = await page.evaluate(() => [...document.querySelectorAll('.evt__detail .liste-qui li')].map((li) => {
+        const cadre = li.closest('.evt__detail').getBoundingClientRect();
+        const nom = li.querySelector('.liste-qui__nom').getBoundingClientRect();
+        const badge = li.querySelector('.badge').getBoundingClientRect();
+        return { sort: badge.right > cadre.right + 0.5 || badge.left < cadre.left - 0.5, nomLarge: nom.width, chevauche: badge.left < nom.right - 0.5 && badge.right > nom.left + 0.5 && badge.top < nom.bottom - 0.5 && badge.bottom > nom.top + 0.5 };
+      }));
+      assert.ok(mesures.length > 0, 'la liste est ouverte');
+      assert.ok(mesures.every((m) => !m.sort), 'un badge sort de la carte');
+      assert.ok(mesures.every((m) => !m.chevauche), 'un badge chevauche le nom');
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'défilement horizontal');
+      assert.ok(await page.evaluate(() => document.documentElement.dataset.variante === 'communicants'));
+      aucuneErreur(page);
+    });
+  }
+
+  test('la version courante n\'a pas l\'attribut `data-variante` : les règles de variante de style.css ne s\'y appliquent pas', async () => {
+    const page = await ouvrir({ largeur: 390, hauteur: 844 });
+    assert.equal(await page.evaluate(() => document.documentElement.hasAttribute('data-variante')), false);
+    assert.equal(await page.evaluate(() => document.documentElement.dataset.variante), undefined);
+  });
+
+  test('le widget lié à une autre table que Communicants_Participations le dit (les choix s\'écriraient là mais ne reviendraient pas) ; lié à la bonne table, aucun message', async () => {
+    const autre = await ouvrir({ requete: `${V}&table-liee=Communicants_Semaine_Innovations_2026` });
+    await texteAttendu(autre, SEL.etat, /lié à la table « Communicants_Semaine_Innovations_2026 » au lieu de « Communicants_Participations »[\s\S]*Données source/);
+    aucuneErreur(autre);
+    const bonne = await ouvrir({ requete: V });
+    await pause(400);
+    assert.equal(await bonne.locator(SEL.etat).innerText(), '');
+    aucuneErreur(bonne);
+  });
+
+  test('la version courante ne vérifie pas la table liée (aucun changement de comportement)', async () => {
+    const page = await ouvrir({ requete: '?table-liee=Autre' });
+    await pause(400);
+    assert.equal(await page.locator(SEL.etat).innerText(), '');
+    assert.equal(await page.locator(SEL.evenement).count(), 30);
     aucuneErreur(page);
   });
 

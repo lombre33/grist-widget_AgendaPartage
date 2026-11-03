@@ -36,6 +36,7 @@
                     ?sans-personnels  la colonne Cibles ne contient que les quatre publics des plannings (aucune séance « Personnels »)
                     ?variante=communicants  la variante des communicant·es : les tables Communicants_Inscrits, Communicants_Participations et Communicants_Demandes
                                     (les tables Annuaire, Participations et Demandes_Annuaire n'existent plus pour le widget : toute tentative d'y accéder est une erreur)
+                    ?table-liee=Autre  le widget est lié à la table « Autre » au lieu de celle des présences (Grist le dit par getSelectedTableId)
                     ?sans-inscrits  (variante) la table Communicants_Inscrits n'existe pas encore : le widget la crée, avant les colonnes de Communicants_Participations
                     ?vide           démarrer sans aucune présence
                     ?foule          60 personnes de plus inscrites à l'événement 3 (liste longue, groupée par établissement)
@@ -175,6 +176,10 @@
     onRecords(cb, options) {
       console.info('[faux Grist] onRecords', options);
       rappel = cb;
+    },
+    async getSelectedTableId() {   // la table à laquelle Grist a lié le widget (celle de ses `onRecords`)
+      await attendre(60);
+      return params.get('table-liee') || N.participations;
     },
     docApi: {
       async fetchTable(nom) {

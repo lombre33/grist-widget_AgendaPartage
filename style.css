@@ -183,6 +183,11 @@ img.avatar--probable { opacity: .6; }   /* seul le logo est atténué : les init
 .detail__tout { padding: 8px 0; border: 0; background: none; color: var(--magenta); font-size: 0.85rem; font-weight: 700; text-decoration: underline; }
 .badge { padding: 1px 8px; border: 1px solid var(--magenta); border-radius: 999px; font-size: 0.75rem; font-weight: 700; color: var(--magenta); white-space: nowrap; }
 .badge--sur { background: var(--magenta); color: #fff; }
+/* Variante : le libellé du badge est long (« Assure la communication »). Au lieu d’écraser le nom ou de sortir de la carte, il passe sous le nom
+   quand la place manque. Rien ne s’applique à la version courante : ces règles exigent l’attribut `data-variante`, posé par widget.js pour une variante seulement. */
+[data-variante] .liste-qui li { flex-wrap: wrap; }
+[data-variante] .liste-qui__qui { flex: 1 1 8rem; }
+[data-variante] .liste-qui .badge { max-width: 100%; white-space: normal; }
 .detail__infos { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; }
 .detail__infos dt { font-weight: 700; }
 .detail__infos dd { margin: 0; }

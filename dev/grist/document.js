@@ -274,10 +274,11 @@ module.exports.supprimerDocument = supprimerDocument;
  * Communicants_Demandes et les colonnes de Communicants_Participations, à sa première ouverture par un propriétaire.
  * Renvoie { pageCom } : l'identifiant de la page.
  */
-async function ajouterCommunicants(doc, widget = WIDGET) {
-  await appliquer(PROPRIETAIRE, doc, [['AddTable', 'Communicants_Participations', ['A', 'B', 'C'].map((id) => ({ id, type: 'Any', isFormula: true, formula: '' }))]]);
+async function ajouterCommunicants(doc, widget = WIDGET, table = 'Communicants_Participations') {
+  // `table` : la table à laquelle le widget est lié (par défaut la bonne ; une autre pour reproduire un widget ajouté sur la mauvaise table)
+  await appliquer(PROPRIETAIRE, doc, [['AddTable', table, ['A', 'B', 'C'].map((id) => ({ id, type: 'Any', isFormula: true, formula: '' }))]]);
   const tables = await api(PROPRIETAIRE, 'GET', `/docs/${doc}/tables/_grist_Tables/records`);
-  const tableRef = tables.records.find((t) => t.fields.tableId === 'Communicants_Participations').id;
+  const tableRef = tables.records.find((t) => t.fields.tableId === table).id;
   const [{ sectionRef }] = await appliquer(PROPRIETAIRE, doc, [['CreateViewSection', tableRef, 0, 'custom', null, null]]);
   const url = `${widget}${widget.includes('?') ? '&' : '?'}variante=communicants`;
   await appliquer(PROPRIETAIRE, doc, [['UpdateRecord', '_grist_Views_section', sectionRef,
