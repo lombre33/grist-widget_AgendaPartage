@@ -59,7 +59,7 @@ async function capturer(navigateur, base, requete, largeur, hauteur, action) {
   if (action) await action(page);
   await pause(600);
   const r = await page.evaluate(() => ({
-    html: document.documentElement.outerHTML.replace(/Version [^<]*?·\s*[vw]\b/g, 'Version X').replace(/\?v=\d+v/g, ''),
+    html: document.documentElement.outerHTML.replace(/Version [^<]*?·\s*[a-z]\b/g, 'Version X').replace(/\?v=\d+v/g, ''),
     histo: JSON.stringify(window.MOCK_HISTORIQUE || null), actions: JSON.stringify(window.MOCK_ACTIONS || null),
     focus: document.activeElement && document.activeElement.outerHTML.slice(0, 120),
   }));
