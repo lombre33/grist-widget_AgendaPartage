@@ -34,6 +34,9 @@
                     ?cibles-vides   la colonne Cibles existe mais ne contient aucune valeur (le widget n'y touche pas)
                     ?evenements-lecture-seule les règles d'accès refusent toute modification des lignes de Evenements
                     ?sans-personnels  la colonne Cibles ne contient que les quatre publics des plannings (aucune séance « Personnels »)
+                    ?variante=communicants  la variante des communicant·es : les tables Communicants_Inscrits, Communicants_Participations et Communicants_Demandes
+                                    (les tables Annuaire, Participations et Demandes_Annuaire n'existent plus pour le widget : toute tentative d'y accéder est une erreur)
+                    ?sans-inscrits  (variante) la table Communicants_Inscrits n'existe pas encore : le widget la crée, avant les colonnes de Communicants_Participations
                     ?vide           démarrer sans aucune présence
                     ?foule          60 personnes de plus inscrites à l'événement 3 (liste longue, groupée par établissement)
 
@@ -41,6 +44,13 @@
    l'Annuaire est refusée : le widget ne doit pas y écrire (l'attribut utilisateur « acl » recharge le document). */
 (function () {
   const params = new URLSearchParams(location.search);
+  // Les noms des trois tables que le widget lit et écrit ; la variante des communicant·es a les siennes.
+  const variante = params.get('variante');
+  const N = variante === 'communicants'
+    ? { annuaire: 'Communicants_Inscrits', participations: 'Communicants_Participations', demandes: 'Communicants_Demandes' }
+    : { annuaire: 'Annuaire', participations: 'Participations', demandes: 'Demandes_Annuaire' };
+  window.MOCK_TABLES = new Set();   // toutes les tables auxquelles le widget a touché (lecture ou action)
+  let inscritsCree = !params.has('sans-inscrits');
 
   // --- Établissements (faux logos : pastilles colorées générées ici) -----------------------
   const pastille = (lettres, fond) =>
@@ -104,8 +114,8 @@
       [7, 5, 'présent'], [9, 1, 'présent'], [9, 5, 'présent'], [9, 8, 'présent'], [9, 4, 'à confirmer'], [9, 6, 'présent'], [9, 7, 'présent'], [17, 6, 'présent'], [19, 2, 'à confirmer'],
       [19, 5, 'présent'], [21, 3, 'présent'], [22, 8, 'présent'], [26, 4, 'présent'], [26, 6, 'présent'], [26, 7, 'présent'], [26, 3, 'présent'], [26, 8, 'à confirmer'],
       [7, moiId, 'à confirmer']];
-    demo.forEach(([e, p, st]) => ajouterPresence(p, e, st));
-    if (params.has('foule')) ANNUAIRE.filter((p) => p.id >= 9).forEach((p) => ajouterPresence(p.id, 3, p.id % 5 ? 'présent' : 'à confirmer'));
+    demo.forEach(([e, p, st]) => ajouterPresence(p, e, variante === 'communicants' ? 'assure la communication' : st));
+    if (params.has('foule')) ANNUAIRE.filter((p) => p.id >= 9).forEach((p) => ajouterPresence(p.id, 3, variante === 'communicants' ? 'assure la communication' : p.id % 5 ? 'présent' : 'à confirmer'));
   }
 
   // Lignes de connexion restées là (page fermée avant leur suppression) : sans événement ni statut
@@ -152,7 +162,7 @@
   let rappel = null;
   // Dans onRecords (contrairement à fetchTable), Grist rend une référence sous la forme { tableId, rowId }
   const reference = (tableId, rowId) => (rowId ? { tableId, rowId } : 0);
-  const enregistrements = () => participations.map(({ ...l }) => (fermeAuxInconnus() ? (delete l.Email, delete l.Utilisateur, l) : l)).map((l) => ({ ...l, Utilisateur: reference('Annuaire', l.Utilisateur), Evenement: reference('Evenements', l.Evenement) }));
+  const enregistrements = () => participations.map(({ ...l }) => (fermeAuxInconnus() ? (delete l.Email, delete l.Utilisateur, l) : l)).map((l) => ({ ...l, Utilisateur: reference(N.annuaire, l.Utilisateur), Evenement: reference('Evenements', l.Evenement) }));
   const notifier = () => setTimeout(() => rappel && rappel(enregistrements(), null), 120);
   const estMienne = (ligne) => (ligne.Email || '').toLowerCase() === emailConnecte.toLowerCase();
 
@@ -169,32 +179,41 @@
     docApi: {
       async fetchTable(nom) {
         await attendre(40);
+        window.MOCK_TABLES.add(nom);
         if (nom === 'Evenements') {
           const t = JSON.parse(JSON.stringify(tableEvenements));
           if (params.has('sans-personnels') && t.Cibles) t.Cibles = t.Cibles.map((v) => { const l = (v || []).slice(1).filter((x) => x !== 'Personnels'); return l.length ? ['L', ...l] : null; });
           return t;
         }
-        if (nom === 'Annuaire' && fermeAuxInconnus()) throw new Error('Blocked by table read access rules');
-        if (nom === 'Demandes_Annuaire') {
+        if (nom === N.annuaire && !inscritsCree) throw new Error(`Table inconnue : ${nom}`);
+        if (nom === N.annuaire && fermeAuxInconnus()) throw new Error('Blocked by table read access rules');
+        if (nom === N.demandes) {
           if (!demandeCreee) throw new Error(`Table inconnue : ${nom}`);
           return enColonnes(demandes.filter((l) => emailConnecte && l.Email === emailConnecte), ['id', 'Nom', 'Prenom', 'Email_saisi', 'Etablissement', 'Email', ...(colonneNomConnexion ? ['Nom_connexion'] : []), 'Date']);
         }
-        if (nom === 'Annuaire') return enColonnes(annuaireVisible(), ['id', 'prenom', 'nom', 'email', 'Etablissement', 'nom_de_domaine']);
+        if (nom === N.annuaire) return enColonnes(annuaireVisible(), ['id', 'prenom', 'nom', 'email', 'Etablissement', 'nom_de_domaine']);
         if (nom === 'Etablissement') return enColonnes(ETABLISSEMENTS);
-        if (nom === 'Participations') return enColonnes(participations, ['id', ...colonnesParticipations.filter((c) => !(fermeAuxInconnus() && ['Email', 'Utilisateur'].includes(c)))]);
+        if (nom === N.participations) return enColonnes(participations, ['id', ...colonnesParticipations.filter((c) => !(fermeAuxInconnus() && ['Email', 'Utilisateur'].includes(c)))]);
         throw new Error(`Table inconnue : ${nom}`);
       },
       async applyUserActions(actions) {
         await attendre();
         window.MOCK_ACTIONS.push(JSON.parse(JSON.stringify(actions)));
+        actions.forEach((a) => window.MOCK_TABLES.add(a[1]));
         historique.push(JSON.parse(JSON.stringify(actions)));
         try { sessionStorage.setItem('mock-historique', JSON.stringify(historique)); } catch (e) { /* sans stockage : seul MOCK_ACTIONS sert */ }
         // Une opération est refusée en bloc : la demande n'est pas enregistrée si la création dans l'Annuaire est refusée
-        if (params.has('sans-inscription') && actions.some((a) => a[1] === 'Annuaire')) throw new Error('Blocked by table create access rules');
+        if (params.has('sans-inscription') && actions.some((a) => a[1] === N.annuaire)) throw new Error('Blocked by table create access rules');
         const retValues = [];
         for (const [type, table, ...args] of actions) {
           retValues.push(null);
-          if (table === 'Annuaire') {
+          if (table === N.annuaire && type === 'AddTable' && variante === 'communicants') {   // la variante crée sa propre table de personnes
+            if (params.has('sans-droits')) throw new Error('Blocked by table structure access rules');
+            inscritsCree = true;
+            retValues[retValues.length - 1] = { table_id: N.annuaire };
+            continue;
+          }
+          if (table === N.annuaire) {
             // Seule exception : une personne connectée qui n'y est pas encore crée sa propre ligne (formulaire d'inscription)
             if (type !== 'AddRecord' || !emailConnecte || personneDe(emailConnecte)) throw new Error('Le widget ne doit pas écrire dans l’Annuaire (attribut utilisateur : rechargement du document)');
             const v = args[1] || {};
@@ -207,12 +226,12 @@
             history.replaceState(null, '', u.href);
             continue;
           }
-          if (table === 'Demandes_Annuaire') {
+          if (table === N.demandes) {
             if (type === 'AddTable') {
               if (params.has('sans-droits')) throw new Error('Blocked by table structure access rules');
               demandeCreee = true;
               colonneNomConnexion = true;
-              retValues[retValues.length - 1] = { table_id: 'Demandes_Annuaire' };
+              retValues[retValues.length - 1] = { table_id: N.demandes };
             } else if (type === 'AddColumn') {
               if (params.has('sans-droits')) throw new Error('Blocked by table structure access rules');
               if (args[0] === 'Nom_connexion') { colonneNomConnexion = true; try { sessionStorage.setItem('mock-colonne-nom', '1'); } catch (e) { /* sans stockage */ } }
@@ -246,7 +265,9 @@
             }
             continue;
           }
-          if (table !== 'Participations') throw new Error(`Table inconnue : ${table}`);
+          if (table !== N.participations) throw new Error(`Table inconnue : ${table}`);
+          // une colonne qui renvoie à une table qui n'existe pas encore est refusée, comme dans Grist
+          if (type === 'AddColumn' && args[1] && args[1].type === `Ref:${N.annuaire}` && !inscritsCree) throw new Error(`Table inconnue : ${N.annuaire}`);
           if ((type === 'AddColumn' || type === 'RemoveColumn') && (params.has('sans-droits') || fermeAuxInconnus())) throw new Error('Blocked by table structure access rules');
           if (type === 'AddColumn') {
             colonnesParticipations.push(args[0]);
@@ -304,7 +325,7 @@
       const evt = 1 + Math.floor(Math.random() * window.MOCK_EVENEMENTS.length);
       const existante = participations.find((l) => l.Evenement === evt && l.Utilisateur === p.id);
       if (existante) participations = participations.filter((l) => l !== existante);
-      else ajouterPresence(p.id, evt, Math.random() < 0.6 ? 'présent' : 'à confirmer');
+      else ajouterPresence(p.id, evt, variante === 'communicants' || Math.random() < 0.6 ? (variante === 'communicants' ? 'assure la communication' : 'présent') : 'à confirmer');
       document.getElementById('simuler-info').textContent = `${p.prenom} ${existante ? 'se retire de' : 'ajoute'} l’événement ${evt}`;
       notifier();
     });

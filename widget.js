@@ -11,6 +11,9 @@
    - Etablissement  : le logo de chaque établissement
    - Participations : la table à laquelle le widget est lié, une ligne par présence. Le widget y crée
                       lui-même ses colonnes à la première ouverture ; les présences lui arrivent en direct.
+
+   Une variante (`?variante=communicants` dans l’adresse du widget, voir VARIANTES) remplace ces trois tables par les siennes
+   (préfixe `Communicants_`) et change quelques textes ; Evenements et Etablissement restent ceux de tout le monde.
    ============================================================================ */
 
 /* ----------------------------------------------------------------------------
@@ -38,6 +41,11 @@ const CONFIG = {
   },
   // Valeurs écrites dans la colonne « Statut » (les anciennes valeurs « sûr » et « probable » sont toujours lues).
   statuts: { sur: 'présent', probable: 'à confirmer' },
+  // Les boutons proposés à la personne, dans l’ordre : « sur » (✓ Présent) et « probable » (? À confirmer).
+  boutons: ['sur', 'probable'],
+  // Vrai (variante) : la table des personnes (`tables.annuaire`) est créée par le widget si elle manque, avec les colonnes ci-dessous.
+  // Faux : l’Annuaire existe déjà et le widget n’y touche pas.
+  annuaireACreer: false,
   // Colonnes de la table Annuaire.
   annuaire: {
     email: 'email',                      // rapproché de l’e-mail de connexion (voir identifierMoi)
@@ -90,6 +98,101 @@ const LIBELLES = {
   probable: { bouton: '? À confirmer', badge: 'À confirmer', resume: ['à confirmer', 'à confirmer'] },
 };
 
+/* Les textes qui citent « Présent » / « À confirmer », la présence ou l’Annuaire : les seuls qu’une variante remplace (voir VARIANTES). */
+const TEXTES = {
+  legende: null,   // légende des colonnes étroites ; null : celle de index.html
+  lectureSeule: 'Le planning est en lecture seule. Pour indiquer votre présence, connectez-vous à Grist avec votre adresse professionnelle : elle doit figurer dans l’annuaire du document.',
+  nonReconnu: 'Vous n’êtes pas reconnu(e) : connectez-vous avec votre compte pour indiquer votre présence.',
+  horsAnnuaire: (email, table) => `Votre adresse de connexion (${email}) n’est pas dans la table « ${table} » : demandez à y être ajouté(e) pour indiquer votre présence.`,
+  filtre: 'Ne garder que les événements où vous êtes présent(e) ou à confirmer',
+  retirer: 'Recliquer pour retirer ma présence',
+  groupeChoix: (titre) => `Ma présence : ${titre}`,
+  etapeCocher: ['Revenez ici et cochez', 'Le planning vous reconnaît : choisissez « Présent » ou « À confirmer » pour chaque événement.'],
+  illustrationCocher: 'cocher',
+  noteConnexion: 'Votre adresse professionnelle doit figurer dans l’annuaire du pôle. Si ce n’est pas le cas, un formulaire vous permettra de demander votre ajout.',
+  inscription: {   // ce que lit la personne pendant l’inscription automatique
+    faite: 'Bienvenue ! Vous êtes inscrit(e) dans l’annuaire : le planning se recharge, vous pourrez ensuite indiquer vos présences.',
+    refusee: 'Votre demande est enregistrée : l’organisateur vous ajoute à l’annuaire dès que possible, vous pourrez alors indiquer vos présences.',
+    refuseeSansDemande: 'Vous n’êtes pas encore dans l’annuaire : demandez à l’organisateur de vous y ajouter pour indiquer vos présences.',
+    echec: 'Votre inscription à l’annuaire n’a pas pu se faire automatiquement. Réessayez dans un instant ou prévenez l’organisateur.',
+    encours: 'Inscription à l’annuaire en cours…',
+  },
+};
+
+/* ----------------------------------------------------------------------------
+   VARIANTES — le même planning, les mêmes événements, établissements et logos pour un autre public, choisi par l’adresse du widget :
+   `…/index.html?variante=communicants`. Sans ce paramètre rien ne change : c’est la version courante, avec l’Annuaire et `Participations`.
+   Une variante ne décrit que ce qui diffère : les tables propres au public, les boutons proposés, quelques textes.
+   Un nom de variante inconnu (faute de frappe dans l’adresse) bloque le widget : mal réglé, il écrirait dans les tables d’un autre public.
+   ---------------------------------------------------------------------------- */
+const VARIANTES = {
+  // Les communicant·es : une personne connectée (même compte que Resana, via ProConnect) qui n’est pas dans l’Annuaire. Elle est inscrite
+  // toute seule dans sa propre liste, `Communicants_Inscrits`, et indique les événements dont elle assure la communication (un seul bouton).
+  // `Evenements` et `Etablissement` (planning, publics visés, logos) sont ceux de tout le monde ; tout le reste porte le préfixe `Communicants_`.
+  communicants: {
+    config: {
+      tables: { annuaire: 'Communicants_Inscrits' },
+      participations: { table: 'Communicants_Participations' },
+      demandes: { table: 'Communicants_Demandes' },
+      statuts: { sur: 'assure la communication', probable: null },
+      boutons: ['sur'],
+      annuaireACreer: true,
+      creerColonneCibles: false,   // la structure des tables communes n’est jamais modifiée depuis cette variante
+    },
+    libelles: {
+      sur: { bouton: '✓ Assure la communication', badge: 'Assure la communication', resume: ['assure la communication', 'assurent la communication'] },
+    },
+    textes: {
+      legende: '✓ assure la communication',
+      lectureSeule: 'Le planning est en lecture seule. Pour indiquer les événements dont vous assurez la communication, connectez-vous à Grist avec votre compte professionnel.',
+      nonReconnu: 'Vous n’êtes pas reconnu(e) : connectez-vous avec votre compte pour indiquer les événements dont vous assurez la communication.',
+      horsAnnuaire: (email) => `Votre adresse de connexion (${email}) n’est pas encore enregistrée : prévenez l’organisateur pour indiquer les événements dont vous assurez la communication.`,
+      filtre: 'Ne garder que les événements dont vous assurez la communication',
+      retirer: 'Recliquer pour retirer',
+      groupeChoix: (titre) => `Communication : ${titre}`,
+      etapeCocher: ['Revenez ici et cochez', 'Le planning vous reconnaît : le bouton « Assure la communication » apparaît sur chaque événement.'],
+      illustrationCocher: 'cocherUn',
+      noteConnexion: '',
+      inscription: {
+        faite: 'Bienvenue ! Vous êtes inscrit(e) : le planning se recharge, vous pourrez ensuite indiquer les événements dont vous assurez la communication.',
+        refusee: 'Votre demande est enregistrée : l’organisateur vous inscrit dès que possible, vous pourrez alors indiquer les événements dont vous assurez la communication.',
+        refuseeSansDemande: 'Vous n’êtes pas encore inscrit(e) : demandez à l’organisateur de vous ajouter pour indiquer les événements dont vous assurez la communication.',
+        echec: 'Votre inscription n’a pas pu se faire automatiquement. Réessayez dans un instant ou prévenez l’organisateur.',
+        encours: 'Inscription en cours…',
+      },
+    },
+  },
+};
+
+/** Recopie `source` dans `cible`, objet par objet ; une valeur `null` retire la clé. */
+function fusionner(cible, source) {
+  const objet = (v) => v && typeof v === 'object' && !Array.isArray(v);
+  for (const [cle, valeur] of Object.entries(source)) {
+    if (valeur === null) delete cible[cle];
+    else if (objet(valeur) && objet(cible[cle])) fusionner(cible[cle], valeur);
+    else cible[cle] = valeur;
+  }
+}
+
+// La variante demandée par l’adresse du widget (null : aucune). Appliquée tout de suite : les définitions plus bas lisent déjà CONFIG.
+const VARIANTE_DEMANDEE = (() => {
+  try {
+    const params = new URLSearchParams(location.search);
+    return params.has('variante') ? params.get('variante').trim().toLowerCase() : null;
+  } catch (err) { return null; }
+})();
+const VARIANTE_CONNUE = VARIANTE_DEMANDEE !== null && Object.prototype.hasOwnProperty.call(VARIANTES, VARIANTE_DEMANDEE);
+if (VARIANTE_CONNUE) {
+  fusionner(CONFIG, VARIANTES[VARIANTE_DEMANDEE].config);
+  fusionner(LIBELLES, VARIANTES[VARIANTE_DEMANDEE].libelles);
+  fusionner(TEXTES, VARIANTES[VARIANTE_DEMANDEE].textes);
+  // Où Grist ramène la personne une fois connectée : la page de cette variante, dont le numéro (…/p/N dans l’adresse Grist) est donné par
+  // `&page=N` dans l’adresse du widget. Sans lui, Grist la ramène à la première page du document (ce ne serait pas la bonne : la page de la version courante).
+  const numeroPage = new URLSearchParams(location.search).get('page') || '';
+  CONFIG.connexion.retour = /^\d{1,5}$/.test(numeroPage) ? `/{doc}/Semaine-de-linnovation-2026/p/${numeroPage}?style=singlePage` : '';
+}
+const VARIANTE_INCONNUE = VARIANTE_DEMANDEE !== null && !VARIANTE_CONNUE;
+
 /* Publics visés : les quatre publics des plannings imprimés, plus les personnels (séances qu’aucun planning ne vise), saisis dans la colonne
    « Cibles » de Evenements (liste de choix). La rangée de bulles « Pour qui ? » n’apparaît que si cette colonne existe et contient au moins
    une valeur, et une bulle n’apparaît que si une séance au moins la porte. */
@@ -102,7 +205,7 @@ const CIBLES = [
 ];
 
 /* Numéro de version, affiché en bas de page : il permet de vérifier quelle version Grist a chargée (cache du navigateur). */
-const VERSION = '2026-10-23 · v';
+const VERSION = `2026-11-03 · w${VARIANTE_CONNUE ? ` · ${VARIANTE_DEMANDEE}` : ''}`;
 
 const JOURS_SEMAINE = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
 const MOIS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
@@ -201,6 +304,7 @@ function codeStatut(v) {
   const s = sansAccent(v);
   if (/^(present|sur)/.test(s)) return 'sur';
   if (/^(a confirmer|prob)/.test(s)) return 'probable';
+  if (s === sansAccent(CONFIG.statuts.sur)) return 'sur';   // la valeur d’une variante (« assure la communication »)
   return null;
 }
 
@@ -533,8 +637,7 @@ async function preparerParticipations() {
 const EMAIL_ANONYME = 'anon@getgrist.com';
 const estAnonyme = (email) => texte(email).trim().toLowerCase() === EMAIL_ANONYME;
 
-const messageHorsAnnuaire = (email = etat.emailConnexion) =>
-  `Votre adresse de connexion (${email}) n’est pas dans la table « ${CONFIG.tables.annuaire} » : demandez à y être ajouté(e) pour indiquer votre présence.`;
+const messageHorsAnnuaire = (email = etat.emailConnexion) => TEXTES.horsAnnuaire(email, CONFIG.tables.annuaire);
 
 /** Qui suis-je, parmi les personnes de l’Annuaire ? D’abord par l’e-mail de connexion, sinon (repli) par l’e-mail lisible. */
 function identifierMoi() {
@@ -547,7 +650,7 @@ function identifierMoi() {
   const connexion = etat.connexion;
   if (connexion && estAnonyme(connexion.email)) {   // pas connectée : jamais reconnue, même si une ligne de l'Annuaire porte cette adresse
     etat.moi = null;
-    etat.messageMoi = 'Le planning est en lecture seule. Pour indiquer votre présence, connectez-vous à Grist avec votre adresse professionnelle : elle doit figurer dans l’annuaire du document.';
+    etat.messageMoi = TEXTES.lectureSeule;
     return undefined;
   }
   if (connexion && connexion.email) {
@@ -564,7 +667,7 @@ function identifierMoi() {
   etat.moi = null;
   etat.messageMoi = miennes.length
     ? `Impossible de vous reconnaître (${etat.detailConnexion || 'e-mail de connexion indisponible'}). Ouvrez le widget une fois avec un compte propriétaire et vérifiez que les éditeurs peuvent modifier la table « ${CONFIG.participations.table} ».`
-    : 'Vous n’êtes pas reconnu(e) : connectez-vous avec votre compte pour indiquer votre présence.';
+    : TEXTES.nonReconnu;
   return undefined;
 }
 
@@ -844,7 +947,7 @@ function afficherMessage(msg, erreur = false, detail = '') {
 function messageSimple(technique) {
   const cas = [
     [/^Il manque /, 'Le planning n’est pas encore prêt à enregistrer les présences : la configuration du document est incomplète. Prévenez l’organisateur.'],
-    [/inaccessible : identification impossible/, 'Le planning est en lecture seule. Pour indiquer votre présence, connectez-vous à Grist avec votre adresse professionnelle : elle doit figurer dans l’annuaire du document.'],
+    [/inaccessible : identification impossible/, TEXTES.lectureSeule],
     [/^Table « .+ » (introuvable|inaccessible)/, 'Le planning n’est pas disponible pour le moment. Prévenez l’organisateur.'],
     [/^Impossible de lire la table/, 'Le planning est momentanément indisponible. Réessayez dans un instant ou prévenez l’organisateur.'],
     [/^Impossible de vous reconnaître/, 'Vous n’êtes pas reconnu(e) pour l’instant : le planning reste en lecture seule. Prévenez l’organisateur.'],
@@ -966,12 +1069,12 @@ function rendreActions(evenement) {
     const choisi = mien === valeur;
     return `
     <button type="button" data-action="choisir" data-evt="${evenement.id}" data-valeur="${valeur}" data-focus="${valeur}-${evenement.id}"
-            aria-pressed="${choisi}"${choisi ? ' title="Recliquer pour retirer ma présence"' : ''}>${libelle}${choisi ? '<span class="choix__x" aria-hidden="true">✕</span><span class="sr-only"> (recliquer pour retirer)</span>' : ''}</button>`;
+            aria-pressed="${choisi}"${choisi ? ` title="${TEXTES.retirer}"` : ''}>${libelle}${choisi ? '<span class="choix__x" aria-hidden="true">✕</span><span class="sr-only"> (recliquer pour retirer)</span>' : ''}</button>`;
   };
   return `
     <div class="evt__actions">
-      <div class="choix" role="group" aria-busy="${bloque}" aria-label="Ma présence : ${echapper(evenement.titre)}">
-        ${bouton('sur', LIBELLES.sur.bouton)}${bouton('probable', LIBELLES.probable.bouton)}
+      <div class="choix" role="group" aria-busy="${bloque}" aria-label="${TEXTES.groupeChoix(echapper(evenement.titre))}">
+        ${CONFIG.boutons.map((valeur) => bouton(valeur, LIBELLES[valeur].bouton)).join('')}
       </div>
     </div>`;
 }
@@ -1032,7 +1135,7 @@ function rendreEntete() {
   filtre.hidden = !etat.moi || Boolean(etat.erreurColonnes);
   filtre.setAttribute('aria-pressed', String(etat.seulementMesEvenements));
   filtre.textContent = `Mon programme${nb ? ` (${nb})` : ''}`;
-  filtre.title = 'Ne garder que les événements où vous êtes présent(e) ou à confirmer';
+  filtre.title = TEXTES.filtre;
 }
 
 /** Nombre d’événements de « mon programme » (présent ou à confirmer) ce jour-là. */
@@ -1115,6 +1218,34 @@ async function ajouterColonneNom() {
     await grist.docApi.applyUserActions([['AddColumn', d.table, d.nomConnexion, { type: 'Text', isFormula: false, formula: 'user.Name', recalcWhen: 0, label: 'Nom du compte Grist' }]]);
   } catch (err) {
     console.warn(`Colonne « ${d.nomConnexion} » non ajoutée à « ${d.table} »`, err);
+  }
+}
+
+/**
+ * Variante : crée la table des personnes (`Communicants_Inscrits`) si elle n’existe pas encore, avec les mêmes colonnes que l’Annuaire
+ * (seule une personne qui peut modifier la structure y arrive). Elle doit exister avant les colonnes de Participations : `Utilisateur` y renvoie.
+ * L’Annuaire de tout le monde, lui, n’est jamais créé ni modifié par le widget.
+ */
+async function preparerAnnuaire() {
+  const t = CONFIG.tables.annuaire;
+  const a = CONFIG.annuaire;
+  try {
+    await grist.docApi.fetchTable(t);
+    return;
+  } catch (err) {
+    if (MOTIF_REFUS.test(texte(err && err.message))) return;   // elle existe, mais cette personne ne peut pas la lire
+  }
+  try {
+    const { retValues = [] } = (await grist.docApi.applyUserActions([
+      ['AddTable', t, [a.nom, a.prenom, a.email, a.domaine, a.etablissement].map((id) => ({ id, type: 'Text', isFormula: false }))],
+    ])) || {};
+    const creee = retValues[0] && retValues[0].table_id;
+    if (creee && creee !== t) {   // Grist l’a renommée : elle existait déjà sans que le widget la voie
+      console.warn(`Table « ${t} » déjà existante mais invisible pour cette personne : doublon retiré`);
+      await grist.docApi.applyUserActions([['RemoveTable', creee]]);
+    }
+  } catch (err) {
+    console.warn(`Création de la table « ${t} » impossible`, err);
   }
 }
 
@@ -1269,6 +1400,14 @@ const ILLUSTRATIONS = {
     <text x="225" y="97" text-anchor="middle" font-family="Georgia, serif" font-size="13" font-weight="700" fill="#b9348b">? À confirmer</text>
     <rect x="11" y="73" width="140" height="38" rx="19" fill="none" stroke="#ffcc00" stroke-width="3.5"/>
   </svg>`,
+  cocherUn: `<svg viewBox="0 0 320 120" role="img" aria-label="Le planning vous reconnaît : le bouton « Assure la communication » apparaît">
+    <rect x="1" y="1" width="318" height="118" rx="10" fill="#fff" stroke="#e5dce3" stroke-width="2"/>
+    <rect x="16" y="16" width="170" height="11" rx="5.5" fill="#3b1c13"/><rect x="16" y="34" width="120" height="8" rx="4" fill="#d9cfd7"/>
+    <rect x="16" y="54" width="130" height="8" rx="4" fill="#efe9ee"/>
+    <rect x="16" y="78" width="226" height="28" rx="14" fill="#b9348b"/>
+    <text x="129" y="97" text-anchor="middle" font-family="Georgia, serif" font-size="13" font-weight="700" fill="#fff">✓ Assure la communication</text>
+    <rect x="11" y="73" width="236" height="38" rx="19" fill="none" stroke="#ffcc00" stroke-width="3.5"/>
+  </svg>`,
 };
 
 function dateLongue(secondes) {
@@ -1286,7 +1425,7 @@ function contenuConnexion() {
       ? ['boutonIci', 'Cliquez sur « Se connecter »', 'Le bouton est en bas de cette fenêtre.']
       : ['bouton', 'Cliquez sur « Se connecter »', 'Le bouton se trouve en haut à droite de cette page.'],
     ['service', `Choisissez ${echapper(service)}`, `C’est la même connexion que pour ${echapper(reference)} : vos identifiants professionnels habituels.`],
-    ['cocher', 'Revenez ici et cochez', 'Le planning vous reconnaît : choisissez « Présent » ou « À confirmer » pour chaque événement.'],
+    [TEXTES.illustrationCocher, ...TEXTES.etapeCocher],
   ];
   return `
     <p class="acces__sur">Planning en lecture seule</p>
@@ -1297,7 +1436,7 @@ function contenuConnexion() {
         <div class="acces__texte"><h3>${titre}</h3><p>${detail}</p></div>
         <figure>${ILLUSTRATIONS[cle].replace('__SERVICE__', echapper(service)).replace('__REFERENCE__', echapper(reference))}</figure></li>`).join('')}
     </ol>
-    <p class="acces__note">Votre adresse professionnelle doit figurer dans l’annuaire du pôle. Si ce n’est pas le cas, un formulaire vous permettra de demander votre ajout.</p>
+    ${TEXTES.noteConnexion ? `<p class="acces__note">${TEXTES.noteConnexion}</p>` : ''}
     <div class="acces__actions">${lien
       ? `<button type="button" class="acces__lien" data-action="fermer-acces">Voir le planning</button>
       <a class="acces__bouton" href="${echapper(lien)}" target="_top">Se connecter</a>`
@@ -1575,12 +1714,10 @@ async function inscrireAutomatiquement() {
 function messageInscription() {
   if (!inscriptionSansFenetre() || etat.moi || etat.acces !== 'hors_annuaire') return null;
   switch (etat.inscription) {
-    case 'faite': return { texte: 'Bienvenue ! Vous êtes inscrit(e) dans l’annuaire : le planning se recharge, vous pourrez ensuite indiquer vos présences.', erreur: false };
-    case 'refusee': return { texte: etat.demande
-      ? 'Votre demande est enregistrée : l’organisateur vous ajoute à l’annuaire dès que possible, vous pourrez alors indiquer vos présences.'
-      : 'Vous n’êtes pas encore dans l’annuaire : demandez à l’organisateur de vous y ajouter pour indiquer vos présences.', erreur: false };
-    case 'echec': return { texte: 'Votre inscription à l’annuaire n’a pas pu se faire automatiquement. Réessayez dans un instant ou prévenez l’organisateur.', erreur: true };
-    default: return { texte: 'Inscription à l’annuaire en cours…', erreur: false };
+    case 'faite': return { texte: TEXTES.inscription.faite, erreur: false };
+    case 'refusee': return { texte: etat.demande ? TEXTES.inscription.refusee : TEXTES.inscription.refuseeSansDemande, erreur: false };
+    case 'echec': return { texte: TEXTES.inscription.echec, erreur: true };
+    default: return { texte: TEXTES.inscription.encours, erreur: false };
   }
 }
 
@@ -1669,15 +1806,19 @@ document.addEventListener('error', (ev) => {
    Démarrage
    ---------------------------------------------------------------------------- */
 // `grist.simule` n’existe que dans le faux Grist de dev/ (test hors Grist).
-if (typeof grist === 'undefined' || (window.self === window.top && !grist.simule)) {
+if (VARIANTE_INCONNUE) {
+  afficherMessage(`La variante « ${VARIANTE_DEMANDEE} » n’existe pas : vérifiez l’adresse du widget (…?variante=${Object.keys(VARIANTES).join(' ou ')}).`, true);
+  if (typeof grist !== 'undefined') grist.ready({ requiredAccess: 'none' });
+} else if (typeof grist === 'undefined' || (window.self === window.top && !grist.simule)) {
   afficherMessage('Ce widget s’utilise dans Grist : ajoutez-le à une page via « Ajouter un widget > Personnalisé ».', true);
 } else {
   majPied();
+  if (TEXTES.legende) document.querySelector('.legende').textContent = TEXTES.legende;
   relireChoixCibles();
   grist.ready({ requiredAccess: 'full' });
   grist.onRecords(recevoirPresences, { includeColumns: 'all' });
   (async () => {
-    await Promise.all([chargerEvenements(), chargerEtablissements(), preparerParticipations(), preparerDemandes()]);
+    await Promise.all([chargerEvenements(), chargerEtablissements(), CONFIG.annuaireACreer ? preparerAnnuaire().then(preparerParticipations) : preparerParticipations(), preparerDemandes()]);
     await preparerCibles();
     await chargerAnnuaire();
     await verifierAcces();

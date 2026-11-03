@@ -267,3 +267,72 @@ const supprimerDocument = (doc) => api(PROPRIETAIRE, 'DELETE', `/docs/${doc}`).c
 
 module.exports.ajouterLogos = ajouterLogos;
 module.exports.supprimerDocument = supprimerDocument;
+
+/**
+ * La variante « communicants » (widget en `?variante=communicants`) : une table vide Communicants_Participations (colonnes A, B, C par défaut,
+ * comme celle qu'Antoine crée) et une page « Communicants » avec le widget lié à cette table. Le widget crée lui-même Communicants_Inscrits,
+ * Communicants_Demandes et les colonnes de Communicants_Participations, à sa première ouverture par un propriétaire.
+ * Renvoie { pageCom } : l'identifiant de la page.
+ */
+async function ajouterCommunicants(doc, widget = WIDGET) {
+  await appliquer(PROPRIETAIRE, doc, [['AddTable', 'Communicants_Participations', ['A', 'B', 'C'].map((id) => ({ id, type: 'Any', isFormula: true, formula: '' }))]]);
+  const tables = await api(PROPRIETAIRE, 'GET', `/docs/${doc}/tables/_grist_Tables/records`);
+  const tableRef = tables.records.find((t) => t.fields.tableId === 'Communicants_Participations').id;
+  const [{ sectionRef }] = await appliquer(PROPRIETAIRE, doc, [['CreateViewSection', tableRef, 0, 'custom', null, null]]);
+  const url = `${widget}${widget.includes('?') ? '&' : '?'}variante=communicants`;
+  await appliquer(PROPRIETAIRE, doc, [['UpdateRecord', '_grist_Views_section', sectionRef,
+    { options: JSON.stringify({ customView: JSON.stringify({ mode: 'url', url, access: 'full', pluginId: '', sectionId: '' }) }) }]]);
+  const [section] = (await api(PROPRIETAIRE, 'GET', `/docs/${doc}/tables/_grist_Views_section/records`)).records.filter((r) => r.id === sectionRef);
+  return { pageCom: section.fields.parentId };
+}
+
+module.exports.ajouterCommunicants = ajouterCommunicants;
+
+/**
+ * Les règles d'accès des tables des communicant·es, jumelles de celles de l'Annuaire, de Participations et de Demandes_Annuaire, à AJOUTER aux règles du
+ * partage public (installerReglesPartagePublic) une fois le widget ouvert par un propriétaire (c'est lui qui crée les tables). Les règles existantes
+ * ne changent pas. Un second attribut utilisateur, `acl_com` (user.Email → Communicants_Inscrits.email), dit si la personne est inscrite :
+ *  - Communicants_Inscrits : une personne connectée, pas encore inscrite, y crée sa propre ligne (une seule) ; les inscrites lisent nom, prénom,
+ *    établissement et domaine des autres, jamais les e-mails ; seuls les propriétaires modifient ou suppriment ;
+ *  - Communicants_Participations : chacune crée, modifie et supprime ses lignes (son e-mail, ajouté par Grist) ; tout le monde lit les présences, sans
+ *    e-mail pour qui n'est pas inscrit (la colonne `Utilisateur`, un simple numéro de fiche, reste lisible : voir plus bas) ; les personnes non inscrites ne peuvent rien y écrire ;
+ *  - Communicants_Demandes : une personne connectée, pas encore inscrite, y laisse sa trace et ne lit que la sienne ; une fois inscrite elle n'a plus rien à y voir.
+ */
+async function installerReglesCommunicants(doc) {
+  const existantes = (await api(PROPRIETAIRE, 'GET', `/docs/${doc}/tables/_grist_ACLRules/records`)).records;
+  const defaut = (await api(PROPRIETAIRE, 'GET', `/docs/${doc}/tables/_grist_ACLResources/records`)).records.find((r) => r.fields.tableId === '*').id;
+  const fin = Math.max(...existantes.map((r) => r.fields.rulePos)) + 1;
+  const [colonnesInscrits, inscrits, colonnesPart, participations, demandes] = await appliquer(PROPRIETAIRE, doc, [['Communicants_Inscrits', 'email'], ['Communicants_Inscrits', '*'],
+    ['Communicants_Participations', 'Email'], ['Communicants_Participations', '*'], ['Communicants_Demandes', '*']]
+    .map(([tableId, colIds]) => ['AddRecord', '_grist_ACLResources', null, { tableId, colIds }]));
+  const regle = (resource, aclFormula, permissionsText, memo = '') => ({ resource, aclFormula, permissionsText, memo });
+  const horsListe = 'user.Access not in [OWNER] and not user.acl_com.id';
+  // Pourquoi la règle de colonne de Communicants_Participations ne ferme que `Email`, contrairement à Participations (qui ferme aussi `Utilisateur`) :
+  // une personne qui vient de s'inscrire garde, jusqu'à ce qu'elle recharge la page de Grist, les droits qu'elle avait avant (le flux `onRecords` du
+  // widget vient du navigateur de Grist, rempli au chargement). Avec `Utilisateur` fermé, elle ne verrait alors le nom de personne sur les événements.
+  // `Utilisateur` n'est qu'un numéro de fiche : sans la table des inscrits (fermée aux non-inscrits) il ne dit rien.
+  const rules = [
+    regle(colonnesInscrits, 'user.Access not in [OWNER]', '-R'),
+    regle(inscrits, 'user.Access in [OWNER]', '+R+U+C+D'),
+    regle(inscrits, 'user.IsLoggedIn and not user.acl_com.id and newRec.email == user.Email', '+C'),
+    regle(inscrits, horsListe, '-R-U-C-D'),
+    regle(inscrits, '', '+R-U-C-D'),
+    regle(colonnesPart, horsListe, '-R'),
+    regle(participations, 'user.Access in [OWNER]', '+R+U+C+D'),
+    regle(participations, horsListe, '-U-C-D'),
+    regle(participations, 'rec.Email == user.Email and newRec.Email == user.Email', '+U'),
+    regle(participations, 'rec.Email == user.Email', '+D'),
+    regle(participations, 'newRec.Email == user.Email', '+C'),
+    regle(participations, '', '+R-U-C-D'),
+    regle(demandes, 'user.Access in [OWNER]', '+R+U+C+D'),
+    regle(demandes, 'user.Access not in [OWNER] and user.acl_com.id', '-R-U-C-D'),
+    regle(demandes, 'user.IsLoggedIn and newRec.Email == user.Email', '+C'),
+    regle(demandes, 'user.IsLoggedIn and rec.Email == user.Email', '+R+D'),
+    regle(demandes, '', '-R-U-C-D'),
+  ].map((r, i) => ({ ...r, rulePos: fin + i }));
+  // l'attribut utilisateur vient avant toute règle qui l'utilise (juste après l'attribut `acl`, en tête)
+  const attribut = { resource: defaut, userAttributes: JSON.stringify({ name: 'acl_com', tableId: 'Communicants_Inscrits', lookupColId: 'email', charId: 'Email' }), aclFormula: '', permissionsText: '', memo: '', rulePos: 1.5 };
+  await appliquer(PROPRIETAIRE, doc, [attribut, ...rules].map((r) => ['AddRecord', '_grist_ACLRules', null, r]));
+}
+
+module.exports.installerReglesCommunicants = installerReglesCommunicants;

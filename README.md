@@ -125,6 +125,27 @@ La colonne facultative `Cibles` de `Evenements` (type **Liste de choix**, choix 
 - Le choix est gardé sur l’appareil (`localStorage`, clé `semaine-innovation-2026:cibles`).
 - Noms des bulles et infobulle (qui est concerné) : `CIBLES` dans `widget.js` ; style : `.bulle` dans `style.css`.
 
+## Variante pour les communicant·es (`?variante=communicants`)
+
+Le même planning (mêmes événements, mêmes établissements et logos, mêmes publics visés) pour un autre public : les communicant·es, qui se connectent avec le même compte (Resana, via ProConnect) mais ne sont pas dans l’`Annuaire`. Au lieu de « Présent » et « À confirmer », **un seul bouton, « ✓ Assure la communication »**.
+
+- **Aucune copie du code.** Le widget est le même (`index.html`, `widget.js`, `style.css`). La variante est choisie par l’adresse que Grist charge : `https://<compte>.github.io/<dépôt>/index.html?variante=communicants`. Sans paramètre, rien ne change : c’est la version courante. Un nom de variante inconnu (`?variante=communicant`, `?variante=`) arrête le widget avec un message : mal réglé, il écrirait dans les tables d’un autre public.
+- **Des tables à part**, toutes préfixées `Communicants_` ; ce qui n’a pas ce préfixe est commun ou réservé à l’UB :
+
+| Table | Rôle | Créée par |
+| --- | --- | --- |
+| `Evenements`, `Etablissement` | commune : le planning, les publics visés, les logos (un seul endroit à mettre à jour) | déjà là, jamais modifiée par la variante |
+| `Communicants_Participations` | leurs présences, une ligne chacune ; c’est la table à laquelle le widget de la variante est lié | à créer à la main, **vide**, avec ce nom exact ; le widget y ajoute ses colonnes (`Email`, `Utilisateur`, `Evenement`, `Statut`) |
+| `Communicants_Inscrits` | leur « annuaire » : nom, prénom, e-mail, établissement (colonnes de l’`Annuaire`) | le widget, à la première ouverture par un propriétaire |
+| `Communicants_Demandes` | leur journal de connexion (comme `Demandes_Annuaire`) | le widget, de même |
+| `Annuaire`, `Participations`, `Demandes_Annuaire` | version courante (UB) | la variante n’y touche jamais |
+
+- **Inscription automatique** : une personne connectée qui n’est pas dans `Communicants_Inscrits` y est inscrite pendant le chargement, avec son e-mail de connexion, son nom de compte Grist et l’établissement du domaine de son e-mail (colonnes `nom_de_domaine` et `alt_domain` de `Etablissement`) ; domaine inconnu : inscrite sans établissement. Le propriétaire qui ouvre la page en premier s’y inscrit aussi (sa ligne se supprime à la main si besoin).
+- **Mise en route** : 1. créer la table vide `Communicants_Participations` ; 2. ajouter sur une nouvelle page un widget personnalisé (accès complet) lié à cette table, avec l’adresse ci-dessus ; 3. l’ouvrir une fois avec un compte propriétaire (le widget crée les tables et les colonnes) ; 4. poser les règles d’accès ci-dessous ; 5. supprimer la colonne `C` restée dans `Communicants_Participations`.
+- **Règles d’accès** (à **ajouter** à celles du partage public, qui ne changent pas ; testées dans `grist-reel.test.js`, « variante communicants », fabriquées par `installerReglesCommunicants` dans `dev/grist/document.js`) : un second **attribut utilisateur** `acl_com` (`user.Email` → table `Communicants_Inscrits`, colonne `email`), puis, par table, des règles jumelles de celles de l’`Annuaire`, de `Participations` et de `Demandes_Annuaire` en remplaçant `user.acl.id` par `user.acl_com.id` : `Communicants_Inscrits` (règle de colonne `email` fermée aux non-propriétaires ; propriétaires tout ; `user.IsLoggedIn and not user.acl_com.id and newRec.email == user.Email` → créer ; `user.Access not in [OWNER] and not user.acl_com.id` → tout refusé ; les autres lisent), `Communicants_Participations` (règle de colonne `Email` seule fermée à `user.Access not in [OWNER] and not user.acl_com.id` ; puis les cinq lignes de `Participations`. `Utilisateur` reste lisible, contrairement à `Participations` : une personne tout juste inscrite garde, jusqu’à ce qu’elle recharge la page de Grist, les droits d’avant l’inscription, et ne verrait sinon le nom de personne ; ce n’est qu’un numéro de fiche) et `Communicants_Demandes` (les cinq lignes de `Demandes_Annuaire`). Une table qui n’a pas de règle reste fermée aux non-propriétaires tant que le bloc « Règles par défaut » refuse tout aux non-propriétaires.
+- **Ce que la variante change** (`VARIANTES` dans `widget.js`) : les noms des trois tables, le bouton et les textes qui citent « Présent », « À confirmer » ou l’annuaire (légende, infobulles, fenêtre de connexion et messages d’inscription), le pied de page (nom de la variante). Rien d’autre.
+- **La version courante est protégée** : `node dev/comparer-versions.js <copie de la version en ligne> .` compare son affichage, ses écritures et sa console avec ceux de la version précédente sur 39 scénarios (le 03/11/2026 : aucune différence), et la variante a ses propres tests (faux Grist et vrai Grist).
+
 ## Affichage
 
 - **Participants** : sur chaque carte, un logo par établissement (les trois plus représentés), avec le nombre de personnes quand elles sont plusieurs ; en pointillés quand personne n’est sûr de venir. Le bouton « Participants » déplie la liste (à plat jusqu’à 8 personnes, puis groupée par établissement et limitée à 12 noms avec « Voir les N autres »).
@@ -144,6 +165,7 @@ GitHub Pages : *Settings* → *Pages* → *Deploy from a branch* → `main`, dos
 ## Changer un nom de table ou de colonne, ou un libellé
 - Noms de tables et de colonnes (dont les deux colonnes de présence) : bloc `CONFIG` en haut de `widget.js`.
 - Textes des boutons et des compteurs : `LIBELLES`, juste en dessous de `CONFIG`.
+- Textes qui citent « Présent », « À confirmer » ou l’annuaire (légende, infobulles, fenêtre de connexion, messages d’inscription) : `TEXTES`. Un autre public (tables, bouton, textes) : une entrée de `VARIANTES`, choisie par `?variante=` dans l’adresse du widget (voir « Variante pour les communicant·es »).
 
 ## Tests
 

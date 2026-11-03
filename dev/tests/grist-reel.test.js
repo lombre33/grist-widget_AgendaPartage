@@ -7,7 +7,7 @@ const { describe, test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { serveur, lancerNavigateur, attendre, pause, SEL } = require('./helpers');
 const { GRIST, PROPRIETAIRE, scriptApiReel, api, appliquer, lignes, partager, contexteNavigateur } = require('../grist/lib');
-const { creerDocument, installerReglesAntoine, installerReglesAntoineActuelles, appliquerChangementsGuide, installerReglesRecommandees, installerReglesPartagePublic, ajouterLogos, supprimerDocument, evenements } = require('../grist/document');
+const { creerDocument, installerReglesAntoine, installerReglesAntoineActuelles, appliquerChangementsGuide, installerReglesRecommandees, installerReglesPartagePublic, ajouterCommunicants, installerReglesCommunicants, ajouterLogos, supprimerDocument, evenements } = require('../grist/document');
 
 const PROPRIO = PROPRIETAIRE;
 const JEANNE = 'jeanne.delmas@u-bordeaux.fr';
@@ -919,6 +919,204 @@ describe('vrai Grist', { skip: disponible ? false : `Grist ne répond pas sur ${
       await pause(1500);
       assert.equal((await colonnes(doc)).Email.recalcWhen, 1, 'la colonne n\'a pas été recréée');
       assert.deepEqual(sansEcho(await participations(PROPRIO, doc)), avant, 'l\'e-mail de la présence est toujours là');
+    });
+  });
+
+  describe('variante « communicants » (?variante=communicants) : tables à part, un seul bouton, la version courante intacte', () => {
+    const com = (doc) => ({ doc: doc.doc, page: doc.pageCom });
+    const DOMINIQUE = 'dominique.garcia@exemple.org';
+
+    /** Un document partagé à tout le monde (règles du README), avec la page des communicant·es ; le propriétaire l'ouvre (le widget crée les tables), puis les règles jumelles. */
+    async function documentCommunicants({ regles = true, logos = false } = {}) {
+      const doc = await nouveau({ publique: true, logos });
+      Object.assign(doc, await ajouterCommunicants(doc.doc, `${srv.url}/index.html`));
+      const { page } = await ouvrir(PROPRIO, com(doc));
+      await page.context().close();
+      if (regles) await installerReglesCommunicants(doc.doc);
+      return doc;
+    }
+    const inscrits = (u, doc) => lignes(u, doc.doc, 'Communicants_Inscrits');
+    const presences = (u, doc) => lignes(u, doc.doc, 'Communicants_Participations');
+    const sansLaTrace = async (doc) => ({
+      annuaire: (await lignes(PROPRIO, doc.doc, 'Annuaire')).length,
+      participations: (await lignes(PROPRIO, doc.doc, 'Participations')).length,
+      demandes: (await lignes(PROPRIO, doc.doc, 'Demandes_Annuaire')).length,
+    });
+    const statut = (e) => e.status || Number((String(e.message).match(/→ (\d+)/) || [])[1]);
+
+    test('le propriétaire ouvre : le widget crée Communicants_Inscrits, Communicants_Demandes et les colonnes de Communicants_Participations ; les tables de la version courante ne bougent pas', async () => {
+      const doc = await nouveau({ publique: true });
+      Object.assign(doc, await ajouterCommunicants(doc.doc, `${srv.url}/index.html`));
+      const avant = await sansLaTrace(doc);
+      const { page, widget } = await ouvrir(PROPRIO, com(doc));
+      await attendre(async () => (await widget.locator(SEL.nom).innerText().catch(() => '')) === 'Alix Marchand', { delai: 20000, message: 'le propriétaire n\'est pas reconnu' });
+      const tables = (await api(PROPRIO, 'GET', `/docs/${doc.doc}/tables`)).tables.map((t) => t.id);
+      for (const t of ['Communicants_Inscrits', 'Communicants_Demandes', 'Communicants_Participations']) assert.ok(tables.includes(t), `${t} existe`);
+      const colonnesDe = async (t) => Object.fromEntries((await api(PROPRIO, 'GET', `/docs/${doc.doc}/tables/${t}/columns`)).columns.map((c) => [c.id, c.fields]));
+      const cp = await colonnesDe('Communicants_Participations');
+      assert.deepEqual(Object.keys(cp).sort(), ['A', 'B', 'C', 'Email', 'Evenement', 'Statut', 'Utilisateur']);
+      assert.equal(cp.Utilisateur.type, 'Ref:Communicants_Inscrits');
+      assert.equal(cp.Email.formula, 'user.Email');
+      assert.equal(cp.Email.recalcWhen, 0);
+      assert.deepEqual(JSON.parse(cp.Statut.widgetOptions).choices, ['assure la communication'], 'un seul choix');
+      assert.deepEqual(Object.keys(await colonnesDe('Communicants_Inscrits')).sort(), ['Etablissement', 'email', 'nom', 'nom_de_domaine', 'prenom']);
+      assert.deepEqual(Object.keys(await colonnesDe('Communicants_Demandes')).sort(), ['Date', 'Email', 'Email_saisi', 'Etablissement', 'Nom', 'Nom_connexion', 'Prenom']);
+      assert.deepEqual(await sansLaTrace(doc), avant, 'Annuaire, Participations et Demandes_Annuaire n\'ont pas bougé');
+      assert.equal(await widget.locator('button[data-action="choisir"]').first().innerText(), '✓ Assure la communication');
+      assert.equal((await presences(PROPRIO, doc)).length, 0, 'la ligne de connexion est supprimée');
+      assert.deepEqual(page.erreurs, []);
+    });
+
+    test('une personne de l\'Annuaire ouvre la page des communicant·es : inscrite dans Communicants_Inscrits (pas dans l\'Annuaire), elle coche « Assure la communication »', async () => {
+      const doc = await documentCommunicants();
+      const avant = await sansLaTrace(doc);
+      const { widget, page } = await ouvrir(JEANNE, com(doc));
+      await attendre(async () => (await widget.locator(SEL.nom).innerText().catch(() => '')) === 'Jeanne Delmas', { delai: 20000, message: 'la personne n\'est pas reconnue' });
+      assert.equal(await widget.locator('#acces[open]').count(), 0, 'aucune fenêtre');
+      assert.equal(await widget.locator(SEL.etat).innerText(), '');
+      const liste = await inscrits(PROPRIO, doc);
+      const sienne = liste.find((l) => l.email === JEANNE);
+      assert.deepEqual([sienne.prenom, sienne.nom, sienne.nom_de_domaine, sienne.Etablissement], ['Jeanne', 'Delmas', 'u-bordeaux.fr', 'Université de Bordeaux']);
+      const bouton = carte(widget, 'Atelier Durable').locator('button[data-action="choisir"]');
+      assert.equal(await bouton.count(), 1, 'un seul bouton');
+      await bouton.click();
+      await attendre(async () => (await presences(PROPRIO, doc)).length === 1, { message: 'la présence n\'est pas écrite' });
+      const [p] = await presences(PROPRIO, doc);
+      assert.equal(p.Statut, 'assure la communication');
+      assert.equal(p.Email, JEANNE);
+      assert.equal(p.Utilisateur, sienne.id, 'liée à sa fiche de Communicants_Inscrits');
+      assert.deepEqual(await sansLaTrace(doc), avant, 'rien dans l\'Annuaire, Participations ni Demandes_Annuaire');
+      assert.equal((await lignes(PROPRIO, doc.doc, 'Communicants_Demandes')).filter((d) => d.Email === JEANNE && d.Nom).length, 1, 'une trace dans le journal des communicant·es');
+      assert.equal(await bouton.getAttribute('aria-pressed'), 'true');
+      await bouton.click();
+      await attendre(async () => (await presences(PROPRIO, doc)).length === 0, { message: 'la présence n\'est pas retirée' });
+      assert.deepEqual(page.erreurs, []);
+    });
+
+    test('plusieurs communicant·es en même temps : elles se voient en direct, avec le logo de leur établissement (table commune) ; une personne d\'un domaine inconnu est inscrite sans établissement', async () => {
+      const doc = await documentCommunicants({ logos: true });
+      // chacune s'inscrit en ouvrant la page ; la liste des inscrits est relue toutes les minutes, donc on rouvre la page de Jeanne une fois Karim inscrit
+      const premiere = await ouvrir(JEANNE, com(doc));
+      await attendre(async () => (await premiere.widget.locator(SEL.nom).innerText().catch(() => '')) === 'Jeanne Delmas', { delai: 20000 });
+      const k = await ouvrir(KARIM, com(doc));
+      await attendre(async () => (await k.widget.locator(SEL.nom).innerText().catch(() => '')) === 'Karim Benali', { delai: 20000 });
+      await premiere.page.context().close();
+      const j = await ouvrir(JEANNE, com(doc));
+      await attendre(async () => (await j.widget.locator(SEL.nom).innerText().catch(() => '')) === 'Jeanne Delmas', { delai: 20000 });
+      await carte(j.widget, 'Atelier Durable').locator('button[data-action="choisir"]').click();
+      await attendre(async () => (await presences(PROPRIO, doc)).length === 1);
+      await attendre(async () => (await comptes(k.widget, 'Atelier Durable')).join() === '1,0', { message: 'Karim ne voit pas Jeanne en direct' });
+      assert.match(await carte(k.widget, 'Atelier Durable').locator('.compte--sur').getAttribute('title'), /^1 assure la communication$/);
+      await carte(k.widget, 'Atelier Durable').locator('button[data-action="choisir"]').click();
+      await attendre(async () => (await comptes(j.widget, 'Atelier Durable')).join() === '2,0', { message: 'Jeanne ne voit pas Karim en direct' });
+      await carte(j.widget, 'Atelier Durable').locator(SEL.ligneParticipants).click();
+      const items = await carte(j.widget, 'Atelier Durable').locator(`${SEL.liste} li`).allInnerTexts();
+      assert.equal(items.length, 2);
+      assert.ok(items.some((x) => x.includes('Karim Benali') && x.includes('Bordeaux INP') && x.includes('Assure la communication')));
+      assert.ok(await carte(j.widget, 'Atelier Durable').locator('img.avatar').count() > 0, 'les logos de la table commune');
+      const d = await ouvrir(DOMINIQUE, com(doc));
+      await attendre(async () => (await d.widget.locator(SEL.nom).innerText().catch(() => '')) === 'Dominique Garcia', { delai: 20000 });
+      const sienne = (await inscrits(PROPRIO, doc)).find((l) => l.email === DOMINIQUE);
+      assert.deepEqual([sienne.nom_de_domaine, sienne.Etablissement], ['exemple.org', '']);
+      for (const x of [j, k, d]) assert.deepEqual(x.page.erreurs, []);
+    });
+
+    test('les règles jumelles : chacune ne touche qu\'à ses lignes, ne lit pas les e-mails des autres, n\'écrit rien dans les tables de la version courante', async () => {
+      const doc = await documentCommunicants();
+      const j = await ouvrir(JEANNE, com(doc));
+      await attendre(async () => (await j.widget.locator(SEL.nom).innerText().catch(() => '')) === 'Jeanne Delmas', { delai: 20000 });
+      await carte(j.widget, 'Atelier Durable').locator('button[data-action="choisir"]').click();
+      await attendre(async () => (await presences(PROPRIO, doc)).length === 1);
+      const [pj] = await presences(PROPRIO, doc);
+      const k = await ouvrir(KARIM, com(doc));
+      await attendre(async () => (await k.widget.locator(SEL.nom).innerText().catch(() => '')) === 'Karim Benali', { delai: 20000 });
+      const evt = await evenementId(doc, 'Atelier Durable');
+      const refus = (promesse) => assert.rejects(promesse, /403/);
+      // Karim (inscrit) : pas de présence au nom de Jeanne, pas de modification ni de suppression de la sienne
+      await refus(appliquer(KARIM, doc.doc, [['AddRecord', 'Communicants_Participations', null, { Email: JEANNE, Evenement: evt, Statut: 'assure la communication' }]]));
+      await refus(appliquer(KARIM, doc.doc, [['UpdateRecord', 'Communicants_Participations', pj.id, { Statut: 'à confirmer' }]]));
+      await refus(appliquer(KARIM, doc.doc, [['RemoveRecord', 'Communicants_Participations', pj.id]]));
+      // ... ni de ligne dans la liste des inscrits (déjà inscrit), ni de modification de la fiche d'une autre, ni de lecture des journaux
+      await refus(appliquer(KARIM, doc.doc, [['AddRecord', 'Communicants_Inscrits', null, { nom: 'bis', email: KARIM }]]));
+      await refus(appliquer(KARIM, doc.doc, [['UpdateRecord', 'Communicants_Inscrits', 1, { nom: 'x' }]]));
+      await refus(appliquer(KARIM, doc.doc, [['RemoveRecord', 'Communicants_Inscrits', 1]]));
+      await assert.rejects(lignes(KARIM, doc.doc, 'Communicants_Demandes'), /403/);
+      // ... ni de lecture des e-mails des autres (les noms, prénoms et établissements restent lisibles)
+      const vue = await lignes(KARIM, doc.doc, 'Communicants_Inscrits');
+      assert.ok(vue.length >= 3);
+      assert.ok(vue.every((l) => !('email' in l)), 'les e-mails sont réservés aux propriétaires');
+      assert.ok(vue.some((l) => l.nom === 'Delmas' && l.Etablissement === 'Université de Bordeaux'));
+      // rien dans les tables de la version courante
+      await refus(appliquer(DOMINIQUE, doc.doc, [['AddRecord', 'Participations', null, { Evenement: evt, Statut: 'présent' }]]));   // hors Annuaire : rien dans la version courante (Karim, lui, y est : il y a ses droits)
+      assert.equal((await presences(PROPRIO, doc)).length, 1, 'la présence de Jeanne est intacte');
+      // une personne connectée mais pas encore inscrite : sa propre fiche seulement, jamais celle d'un autre
+      await refus(appliquer(DOMINIQUE, doc.doc, [['AddRecord', 'Communicants_Inscrits', null, { nom: 'Usurpé', email: JEANNE }]]));
+      await refus(appliquer(DOMINIQUE, doc.doc, [['AddRecord', 'Communicants_Participations', null, { Evenement: evt, Statut: 'assure la communication' }]]));
+      await appliquer(DOMINIQUE, doc.doc, [['AddRecord', 'Communicants_Inscrits', null, { nom: 'Garcia', prenom: 'Dominique', email: DOMINIQUE }]]);
+      await refus(appliquer(DOMINIQUE, doc.doc, [['AddRecord', 'Communicants_Inscrits', null, { nom: 'Deux', email: DOMINIQUE }]]));
+      // la structure reste aux propriétaires
+      await refus(appliquer(KARIM, doc.doc, [['RemoveTable', 'Communicants_Inscrits']]));
+      await refus(appliquer(KARIM, doc.doc, [['UpdateRecord', 'Evenements', 1, { Titre: 'x' }]]));
+      for (const x of [j, k]) assert.deepEqual(x.page.erreurs, []);
+    });
+
+    test('personne non connectée : le planning, aucune donnée de personne, la fenêtre de connexion de la variante (bouton unique, pas de note sur l\'annuaire)', async () => {
+      const doc = await documentCommunicants();
+      const { widget } = await ouvrir(null, com(doc));
+      assert.equal(await widget.locator(SEL.evenement).count(), 30);
+      assert.equal(await widget.locator('button[data-action="choisir"]').count(), 0);
+      await widget.locator('#acces[open]').waitFor({ timeout: 15000 });
+      const texte = await widget.locator('#acces').innerText();
+      assert.match(texte, /Choisissez ProConnect[\s\S]*même connexion que pour Resana/);
+      assert.match(texte, /le bouton « Assure la communication » apparaît sur chaque événement/);
+      assert.doesNotMatch(texte, /annuaire|formulaire|Présent|À confirmer/i);
+      assert.match(await widget.locator(SEL.etat).innerText(), /Pour indiquer les événements dont vous assurez la communication, connectez-vous/);
+      const anonyme = async (methode, chemin, corps) => (await fetch(`${GRIST}/api${chemin}`, { method: methode, headers: { 'X-Requested-With': 'XMLHttpRequest', ...(corps ? { 'Content-Type': 'application/json' } : {}) }, body: corps ? JSON.stringify(corps) : undefined })).status;
+      assert.equal(await anonyme('GET', `/docs/${doc.doc}/tables/Communicants_Inscrits/records`), 403);
+      assert.equal(await anonyme('GET', `/docs/${doc.doc}/tables/Communicants_Demandes/records`), 403);
+      assert.equal(await anonyme('POST', `/docs/${doc.doc}/apply`, [['AddRecord', 'Communicants_Participations', null, { Statut: 'assure la communication' }]]), 403);
+      const lue = await (await fetch(`${GRIST}/api/docs/${doc.doc}/tables/Communicants_Participations/records`, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })).json();
+      assert.ok(lue.records.every((l) => !('Email' in l.fields)), 'aucun e-mail');
+      assert.equal((await presences(PROPRIO, doc)).length, 0);
+    });
+
+    test('la version courante (page de l\'Annuaire) fonctionne comme avant dans le même document, et n\'écrit rien dans les tables des communicant·es', async () => {
+      const doc = await documentCommunicants();
+      const avantCom = { inscrits: (await inscrits(PROPRIO, doc)).length, presences: (await presences(PROPRIO, doc)).length };
+      const j = await ouvrir(JEANNE, doc);
+      assert.equal(await j.widget.locator(SEL.nom).innerText(), 'Jeanne Delmas');
+      assert.equal(await carte(j.widget, 'Atelier Durable').locator('button[data-action="choisir"]').count(), 2, 'deux boutons');
+      assert.match(await j.widget.locator(SEL.pied).innerText(), /dans « Participations »$/);
+      await carte(j.widget, 'Atelier Durable').locator(SEL.present).click();
+      await attendre(async () => (await miennes(PROPRIO, doc, JEANNE)).length === 1);
+      assert.equal((await miennes(PROPRIO, doc, JEANNE))[0].Statut, 'présent');
+      assert.deepEqual({ inscrits: (await inscrits(PROPRIO, doc)).length, presences: (await presences(PROPRIO, doc)).length }, avantCom, 'rien chez les communicant·es');
+      // une personne hors Annuaire qui ouvre la version courante s'inscrit toujours dans l'Annuaire, pas chez les communicant·es
+      const avant = (await lignes(PROPRIO, doc.doc, 'Annuaire')).length;
+      const c = await ouvrir(DOMINIQUE, doc);
+      await attendre(async () => (await c.widget.locator(SEL.nom).innerText().catch(() => '')) === 'Dominique Garcia', { delai: 20000 });
+      assert.equal((await lignes(PROPRIO, doc.doc, 'Annuaire')).length, avant + 1);
+      assert.equal((await inscrits(PROPRIO, doc)).length, avantCom.inscrits);
+      for (const x of [j, c]) assert.deepEqual(x.page.erreurs, []);
+    });
+
+    test('adresse mal écrite (?variante=communicant) : le widget s\'arrête avec un message, ne crée rien et n\'écrit dans aucune table', async () => {
+      const doc = await nouveau({ publique: true });
+      Object.assign(doc, await ajouterCommunicants(doc.doc, `${srv.url}/index.html`));
+      await appliquer(PROPRIO, doc.doc, [['UpdateRecord', '_grist_Views_section', (await api(PROPRIO, 'GET', `/docs/${doc.doc}/tables/_grist_Views_section/records`)).records.find((r) => r.fields.parentId === doc.pageCom).id,
+        { options: JSON.stringify({ customView: JSON.stringify({ mode: 'url', url: `${srv.url}/index.html?variante=communicant`, access: 'full', pluginId: '', sectionId: '' }) }) }]]);
+      const avant = await sansLaTrace(doc);
+      const contexte = await contexteNavigateur(navigateur, PROPRIO, { viewport: { width: 1200, height: 800 } });
+      const page = await contexte.newPage();
+      await page.goto(`${GRIST}/${doc.doc}/x/p/${doc.pageCom}`);
+      const widget = await attendre(() => page.frames().find((f) => f.url().startsWith(srv.url)), { message: 'le widget ne s\'est pas chargé' });
+      await widget.locator(SEL.etat).filter({ hasText: 'n’existe pas' }).waitFor({ timeout: 20000 });
+      await pause(1500);
+      const tables = (await api(PROPRIO, 'GET', `/docs/${doc.doc}/tables`)).tables.map((t) => t.id);
+      assert.ok(!tables.includes('Communicants_Inscrits') && !tables.includes('Communicants_Demandes'), 'aucune table créée');
+      assert.deepEqual(await sansLaTrace(doc), avant);
+      assert.equal((await presences(PROPRIO, doc)).length, 0);
+      await contexte.close();
     });
   });
 

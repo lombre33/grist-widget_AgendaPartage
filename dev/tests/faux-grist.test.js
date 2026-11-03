@@ -848,3 +848,167 @@ describe('inscription automatique (sans fenêtre) : e-mail, nom et établissemen
   });
 });
 
+
+/* ----------------------------------------------------------------------------------------------------------------------------------
+   Variante « communicants » (?variante=communicants) : mêmes événements, établissements et logos, mais un seul bouton « Assure la communication »
+   et des tables à part (Communicants_Inscrits, Communicants_Participations, Communicants_Demandes). La version courante, sans paramètre, ne change pas.
+   ---------------------------------------------------------------------------------------------------------------------------------- */
+describe('variante « communicants »', () => {
+  const V = '?variante=communicants';
+  const TABLES_UB = ['Annuaire', 'Participations', 'Demandes_Annuaire'];
+  const tablesTouchees = (page) => page.evaluate(() => [...window.MOCK_TABLES]);
+  const historique = (page) => page.evaluate(() => window.MOCK_HISTORIQUE).then((lots) => lots.flat());
+  const sur = (page) => page.locator(SEL.evenement).first().locator('button[data-action="choisir"]');
+  const ligneStatuts = (page) => page.evaluate(async () => {
+    const t = await grist.docApi.fetchTable('Communicants_Participations');
+    return t.id.map((id, i) => ({ id, evt: t.Evenement[i], statut: t.Statut[i], utilisateur: t.Utilisateur[i] }));
+  });
+
+  test('un seul bouton « ✓ Assure la communication » ; les textes disent « assure la communication », jamais « présent » ni « à confirmer »', async () => {
+    const page = await ouvrir({ requete: V });
+    assert.equal(await sur(page).count(), 1, 'un seul bouton par événement');
+    assert.equal(await sur(page).innerText(), '✓ Assure la communication');
+    assert.equal(await page.locator(SEL.aConfirmer).count(), 0);
+    assert.equal(await page.locator('.legende').textContent(), '✓ assure la communication');
+    assert.equal(await page.locator(SEL.filtre).getAttribute('title'), 'Ne garder que les événements dont vous assurez la communication');
+    assert.match(await carte(page, 'Les Evolutive Learning').locator('.choix').getAttribute('aria-label'), /^Communication : Les Evolutive/);
+    assert.match(await page.locator(SEL.pied).innerText(), /^Version \S+ · \S+ · communicants · \d+ lignes? dans « Communicants_Participations »$/);
+    const corps = await page.locator('body').innerText();
+    assert.doesNotMatch(corps, /À confirmer|à confirmer|Présent\b/, 'aucun libellé de la version courante');
+    assert.equal(await page.locator(SEL.evenement).count(), 30, 'le même planning');
+    aucuneErreur(page);
+  });
+
+  test('les participants sont comptés « assure(nt) la communication » ; l\'établissement et le logo viennent de la table commune', async () => {
+    const page = await ouvrir({ requete: V });
+    const evolu = carte(page, 'Les Evolutive Learning');
+    assert.deepEqual(await comptes(page, 'Les Evolutive Learning'), [6, 0]);
+    assert.equal(await evolu.locator('.compte--sur').getAttribute('title'), '6 assurent la communication');
+    assert.equal(await evolu.locator('.compte--sur .compte__mot').textContent(), ' assurent la communication');
+    assert.equal(await evolu.locator('.compte--probable').count(), 0);
+    await evolu.locator(SEL.ligneParticipants).click();
+    const items = await evolu.locator(`${SEL.liste} li`).allInnerTexts();
+    assert.equal(items.length, 6);
+    assert.ok(items.every((x) => x.includes('Assure la communication')));
+    assert.ok(items.some((x) => x.includes('Université de Bordeaux')), 'l\'établissement des communicant·es est retrouvé dans la table commune');
+    assert.ok(await evolu.locator('img.avatar').count() > 0, 'les logos de la table commune s\'affichent');
+    aucuneErreur(page);
+  });
+
+  test('cocher puis recocher : une ligne dans Communicants_Participations avec « assure la communication », retirée au second clic ; aucune table de la version courante n\'est touchée', async () => {
+    const page = await ouvrir({ requete: V });
+    const bouton = sur(page);
+    await bouton.click();
+    await attendre(async () => (await ligneStatuts(page)).some((l) => l.statut === 'assure la communication' && l.evt === 1 && l.utilisateur === 1), { message: 'la ligne n\'est pas écrite' });
+    assert.equal(await bouton.getAttribute('aria-pressed'), 'true');
+    assert.equal(await bouton.getAttribute('title'), 'Recliquer pour retirer');
+    const ajout = (await actions(page)).flat().find((a) => a[0] === 'AddRecord' && a[3] && 'Evenement' in a[3]);
+    assert.deepEqual(ajout, ['AddRecord', 'Communicants_Participations', null, { Evenement: 1, Statut: 'assure la communication' }], 'le widget n\'écrit ni l\'e-mail ni la personne');
+    await bouton.click();
+    await attendre(async () => !(await ligneStatuts(page)).some((l) => l.evt === 1 && l.utilisateur === 1), { message: 'la ligne n\'est pas retirée' });
+    assert.equal(await bouton.getAttribute('aria-pressed'), 'false');
+    for (const t of TABLES_UB) assert.ok(!(await tablesTouchees(page)).includes(t), `la table ${t} de la version courante ne doit pas être touchée`);
+    assert.deepEqual((await tablesTouchees(page)).filter((t) => !t.startsWith('Communicants_')).sort(), ['Etablissement', 'Evenements']);
+    aucuneErreur(page);
+  });
+
+  test('personne connectée mais pas encore inscrite : elle est inscrite dans Communicants_Inscrits (pas dans l\'Annuaire), avec son établissement, puis reconnue', async () => {
+    const page = await ouvrir({ requete: `${V}&public&inconnu=jean-pierre.dupont@etu.u-bordeaux.fr&nom=Jean-Pierre%20DUPONT` });
+    await attendre(async () => (await historique(page)).some((a) => a[0] === 'AddRecord' && a[1] === 'Communicants_Inscrits'), { message: 'l\'inscription n\'est pas partie' });
+    assert.deepEqual((await historique(page)).filter((a) => ['Communicants_Inscrits', 'Communicants_Demandes'].includes(a[1]) && a[3] && (a[3].nom || a[3].Nom)), [
+      ['AddRecord', 'Communicants_Demandes', null, { Nom: 'Dupont', Prenom: 'Jean-Pierre', Email_saisi: 'jean-pierre.dupont@etu.u-bordeaux.fr', Etablissement: 'Université de Bordeaux' }],
+      ['AddRecord', 'Communicants_Inscrits', null, { nom: 'Dupont', prenom: 'Jean-Pierre', email: 'jean-pierre.dupont@etu.u-bordeaux.fr', nom_de_domaine: 'u-bordeaux.fr', Etablissement: 'Université de Bordeaux' }],
+    ]);
+    await attendre(async () => (await page.locator(SEL.nom).innerText().catch(() => '')) === 'Jean-Pierre Dupont', { delai: 15000, message: 'la personne n\'est pas reconnue après le rechargement' });
+    assert.equal(await page.locator('#acces[open]').count(), 0, 'aucune fenêtre');
+    assert.equal(await sur(page).innerText(), '✓ Assure la communication');
+    for (const t of TABLES_UB) assert.ok(!(await tablesTouchees(page)).includes(t), `la table ${t} de la version courante ne doit pas être touchée`);
+    assert.ok(!(await historique(page)).some((a) => a[1] === 'Annuaire'), 'rien n\'est écrit dans l\'Annuaire');
+    aucuneErreur(page);
+  });
+
+  test('pendant l\'inscription et si elle est refusée, les messages ne parlent pas d\'« annuaire »', async () => {
+    const page = await ouvrir({ requete: `${V}&public&inconnu=sam.roux@asso.example&nom=Sam%20Roux&sans-inscription` });
+    await texteAttendu(page, '#etat', /Votre demande est enregistrée : l’organisateur vous inscrit dès que possible/);
+    assert.doesNotMatch(await page.locator('#etat').innerText(), /annuaire/i);
+    assert.doesNotMatch(await page.locator('body').innerText(), /annuaire/i);
+  });
+
+  test('personne non connectée : la fenêtre de connexion garde ProConnect / Resana, mais l\'étape 3 montre le bouton unique et la note sur l\'annuaire a disparu', async () => {
+    const page = await ouvrir({ requete: `${V}&public&anonyme` });
+    const fenetre = page.locator('#acces[open]');
+    await fenetre.waitFor();
+    const texte = await fenetre.innerText();
+    assert.match(texte, /Pas de compte à créer : c’est le même compte que Resana, via ProConnect\./);
+    assert.match(texte, /Choisissez ProConnect/);
+    assert.match(texte, /le bouton « Assure la communication » apparaît sur chaque événement/);
+    assert.doesNotMatch(texte, /annuaire|formulaire|Présent|À confirmer/i);
+    assert.equal(await fenetre.locator('.acces__note').count(), 0);
+    assert.equal(await fenetre.locator('figure svg[role="img"]').count(), 3);
+    assert.match(await fenetre.locator('figure svg').nth(2).getAttribute('aria-label'), /« Assure la communication »/);
+    assert.match(await page.locator('#etat').innerText(), /Pour indiquer les événements dont vous assurez la communication, connectez-vous/);
+    aucuneErreur(page);
+  });
+
+  test('« Se connecter » ramène à la page de la variante (&page=N dans l\'adresse du widget), jamais à celle de la version courante', async () => {
+    const lien = async (requete) => (await ouvrir({ requete })).locator('#acces[open] a.acces__bouton').getAttribute('href');
+    assert.match(await lien(`${V}&page=12&public&anonyme`), /\/login\?next=%2Fx%2FSemaine-de-linnovation-2026%2Fp%2F12%3Fstyle%3DsinglePage$/);
+    const sans = await lien(`${V}&public&anonyme`);
+    assert.match(sans, /\/login\?next=%2Fx$/, 'sans numéro de page : retour au document');
+    assert.doesNotMatch(sans, /p%2F7/);
+    assert.match(await lien(`${V}&page=12abc&public&anonyme`), /\/login\?next=%2Fx$/, 'un numéro qui n\'en est pas un est ignoré');
+    // la version courante garde sa page
+    assert.match(await lien('?public&anonyme&page=12'), /\/login\?next=%2Fx%2FSemaine-de-linnovation-2026%2Fp%2F7%3Fstyle%3DsinglePage$/);
+  });
+
+  test('première ouverture par un propriétaire : Communicants_Inscrits est créée avant les colonnes de Communicants_Participations (Utilisateur y renvoie)', async () => {
+    const page = await ouvrir({ requete: `${V}&sans-inscrits&sans-colonnes` });
+    const lots = await actions(page);
+    const plat = lots.flat();
+    const iTable = plat.findIndex((a) => a[0] === 'AddTable' && a[1] === 'Communicants_Inscrits');
+    const iColonne = plat.findIndex((a) => a[0] === 'AddColumn' && a[1] === 'Communicants_Participations' && a[2] === 'Utilisateur');
+    assert.ok(iTable >= 0, 'la table des inscrits est créée');
+    assert.ok(iColonne > iTable, 'avant la colonne qui y renvoie');
+    assert.deepEqual(plat[iTable][2].map((c) => c.id), ['nom', 'prenom', 'email', 'nom_de_domaine', 'Etablissement'], 'mêmes colonnes que l\'Annuaire');
+    assert.equal(plat.find((a) => a[0] === 'AddColumn' && a[2] === 'Statut')[3].widgetOptions, JSON.stringify({ choices: ['assure la communication'] }), 'un seul choix possible');
+    for (const t of TABLES_UB) assert.ok(!(await tablesTouchees(page)).includes(t));
+    assert.equal(await page.locator(SEL.evenement).count(), 30);
+    aucuneErreur(page);
+  });
+
+  test('sans droit sur la structure : rien n\'est créé, lecture seule, jamais de repli sur les tables de la version courante', async () => {
+    const page = await ouvrir({ requete: `${V}&sans-inscrits&sans-colonnes&sans-droits` });
+    for (const t of TABLES_UB) assert.ok(!(await tablesTouchees(page)).includes(t));
+    assert.equal(await page.locator('button[data-action="choisir"]').count(), 0, 'lecture seule');
+    assert.equal(await page.locator(SEL.evenement).count(), 30);
+  });
+
+  test('les tables communes ne sont jamais modifiées : pas de colonne « Cibles » créée même si elle manque', async () => {
+    const page = await ouvrir({ requete: `${V}&sans-cibles` });
+    assert.ok(!(await actions(page)).flat().some((a) => a[1] === 'Evenements'), 'Evenements n\'est pas touchée');
+    assert.equal(await page.locator('#cibles').isHidden(), true, 'sans colonne, pas de filtre « Pour qui ? »');
+  });
+
+  test('variante inconnue ou vide : le widget s\'arrête avec un message, sans toucher à aucune table', async () => {
+    for (const requete of ['?variante=communicant', '?variante=', '?variante=constructor']) {
+      const contexte = await navigateur.newContext({ viewport: { width: 1000, height: 800 } });
+      const page = await contexte.newPage();
+      await page.goto(`${srv.url}/dev/index.html${requete}`);
+      await texteAttendu(page, '#etat', /n’existe pas : vérifiez l’adresse du widget/);
+      await pause(400);
+      assert.deepEqual(await page.evaluate(() => [...window.MOCK_TABLES]), [], `${requete} : aucune table lue`);
+      assert.deepEqual(await page.evaluate(() => window.MOCK_ACTIONS), [], `${requete} : aucune action`);
+      assert.equal(await page.locator('.evt').count(), 0);
+      await contexte.close();
+    }
+  });
+
+  test('sans le paramètre, rien ne change : les tables de la version courante, deux boutons, aucune table « Communicants_ » touchée', async () => {
+    const page = await ouvrir();
+    assert.equal(await page.locator(SEL.present).count() > 0 && await page.locator(SEL.aConfirmer).count() > 0, true);
+    assert.equal(await page.locator('.evt').first().locator('button[data-action="choisir"]').count(), 2);
+    assert.equal(await page.locator('.legende').textContent(), '✓ présent · ? à confirmer');
+    assert.deepEqual((await tablesTouchees(page)).filter((t) => t.startsWith('Communicants_')), []);
+    assert.match(await page.locator(SEL.pied).innerText(), /^Version \S+ · \S+ · \d+ lignes? dans « Participations »$/);
+  });
+});
