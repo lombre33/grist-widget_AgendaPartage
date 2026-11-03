@@ -108,13 +108,15 @@ describe('affichage', () => {
     assert.equal(await c.locator(`${SEL.liste} li`).count(), 12);
   });
 
-  test('onglets : le nombre d\'événements de mon programme s\'affiche sur chaque jour et se met à jour', async () => {
+  test('onglets : aucune pastille jaune ; le nombre d\'événements de mon programme reste dit aux lecteurs d\'écran et se met à jour', async () => {
     const page = await ouvrir({ largeur: 390, hauteur: 844 });
-    const badge = (jour) => page.locator(`[data-jour="${jour}"] .onglet__n`);
-    assert.equal(await badge('2026-11-23').count(), 0);
-    assert.equal(await badge('2026-11-24').innerText(), '2');
+    const onglet = (jour) => page.locator(`[data-jour="${jour}"]`);
+    assert.equal(await page.locator('.onglet__n').count(), 0, 'plus de pastille sur les onglets');
+    assert.equal(await onglet('2026-11-23').getAttribute('aria-label'), 'lundi 23 novembre');
+    assert.match(await onglet('2026-11-24').getAttribute('aria-label'), /^mardi 24 novembre : 2 événements dans votre programme$/);
     await carte(page, 'Atelier Durable').locator(SEL.present).click();
-    await attendre(async () => (await badge('2026-11-23').count()) === 1 && (await badge('2026-11-23').innerText()) === '1');
+    await attendre(async () => /^lundi 23 novembre : 1 événement dans votre programme$/.test(await onglet('2026-11-23').getAttribute('aria-label')));
+    assert.equal(await page.locator('.onglet__n').count(), 0);
   });
 
   test('anciennes valeurs « sûr » et « probable » toujours comptées', async () => {

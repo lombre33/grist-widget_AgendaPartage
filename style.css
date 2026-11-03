@@ -83,7 +83,6 @@ a { color: var(--magenta); -webkit-tap-highlight-color: transparent; }
 .onglet[aria-pressed="true"] { background: var(--magenta); border-color: var(--magenta); color: #fff; }
 .onglet[aria-pressed="true"] small { color: #fff; }
 /* nombre d’événements de « mon programme » ce jour-là, à cheval sur le coin de l’onglet */
-.onglet__n { position: absolute; top: -7px; right: -4px; min-width: 18px; height: 18px; padding: 0 4px; border: 1px solid var(--brun); border-radius: 9px; background: var(--jaune); color: var(--brun); font-size: 0.75rem; font-weight: 700; line-height: 16px; text-align: center; }
 
 .filtre { min-height: 44px; padding: 6px 16px; border: 1px solid var(--magenta); border-radius: 999px; background: #fff; color: var(--magenta); font-weight: 700; }
 .filtre[aria-pressed="true"] { background: var(--magenta); color: #fff; }

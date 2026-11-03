@@ -211,7 +211,7 @@ const CIBLES = [
 ];
 
 /* Numéro de version, affiché en bas de page : il permet de vérifier quelle version Grist a chargée (cache du navigateur). */
-const VERSION = `2026-11-03 · w${VARIANTE_CONNUE ? ` · ${VARIANTE_DEMANDEE} 4` : ''}`;
+const VERSION = `2026-11-03 · x${VARIANTE_CONNUE ? ` · ${VARIANTE_DEMANDEE} 4` : ''}`;
 
 const JOURS_SEMAINE = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
 const MOIS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
@@ -1174,7 +1174,7 @@ function rendreOnglets(jours) {
     const n = mesEvenementsDuJour(iso);
     const nom = `${j.nom} ${j.numero} ${j.mois}`;
     return `<button class="onglet" type="button" data-jour="${iso}" data-focus="jour-${iso}" aria-pressed="${iso === etat.jour}" aria-label="${echapper(n ? `${nom} : ${pluriel(n)}` : nom)}">
-      <small>${j.nom.slice(0, 3)}.</small><strong>${j.numero}</strong>${n ? `<span class="onglet__n" aria-hidden="true">${n}</span>` : ''}</button>`;
+      <small>${j.nom.slice(0, 3)}.</small><strong>${j.numero}</strong></button>`;
   }).join('');
 }
 
