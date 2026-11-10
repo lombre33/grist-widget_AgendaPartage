@@ -993,13 +993,15 @@ describe('variante « communicants »', () => {
     aucuneErreur(page);
   });
 
-  test('« Se connecter » ramène à la page de la variante (&page=N dans l\'adresse du widget), jamais à celle de la version courante', async () => {
+  test('« Se connecter » ramène à la page des communicant·es (p/10 par défaut, ou &page=N dans l\'adresse du widget), jamais à celle de la version courante', async () => {
     const lien = async (requete) => (await ouvrir({ requete })).locator('#acces[open] a.acces__bouton').getAttribute('href');
-    assert.match(await lien(`${V}&page=12&public&anonyme`), /\/login\?next=%2Fx%2FSemaine-de-linnovation-2026%2Fp%2F12%3Fstyle%3DsinglePage$/);
+    const page10 = /\/login\?next=%2Fx%2FSemaine-de-linnovation-2026%2Fp%2F10%3Fstyle%3DsinglePage$/;
+    assert.match(await lien(`${V}&page=12&public&anonyme`), /\/login\?next=%2Fx%2FSemaine-de-linnovation-2026%2Fp%2F12%3Fstyle%3DsinglePage$/, '&page=N remplace la page par défaut');
     const sans = await lien(`${V}&public&anonyme`);
-    assert.match(sans, /\/login\?next=%2Fx$/, 'sans numéro de page : retour au document');
+    assert.match(sans, page10, 'sans numéro de page : la page des communicant·es, pas le début du document');
     assert.doesNotMatch(sans, /p%2F7/);
-    assert.match(await lien(`${V}&page=12abc&public&anonyme`), /\/login\?next=%2Fx$/, 'un numéro qui n\'en est pas un est ignoré');
+    assert.match(await lien(`${V}&page=12abc&public&anonyme`), page10, 'un numéro qui n\'en est pas un est ignoré');
+    assert.match(await lien(`${V}&page=&public&anonyme`), page10, 'un numéro vide aussi');
     // la version courante garde sa page
     assert.match(await lien('?public&anonyme&page=12'), /\/login\?next=%2Fx%2FSemaine-de-linnovation-2026%2Fp%2F7%3Fstyle%3DsinglePage$/);
   });

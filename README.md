@@ -130,6 +130,7 @@ La colonne facultative `Cibles` de `Evenements` (type **Liste de choix**, choix 
 Le même planning (mêmes événements, mêmes établissements et logos, mêmes publics visés) pour un autre public : les communicant·es, qui se connectent avec le même compte (Resana, via ProConnect) mais ne sont pas dans l’`Annuaire`. Au lieu de « Présent » et « À confirmer », **un seul bouton, « ✓ Assure la communication »**.
 
 - **Aucune copie du code.** Le widget est le même (`index.html`, `widget.js`, `style.css`). La variante est choisie par l’adresse que Grist charge : `https://<compte>.github.io/<dépôt>/index.html?variante=communicants`. Sans paramètre, rien ne change : c’est la version courante. Un nom de variante inconnu (`?variante=communicant`, `?variante=`) arrête le widget avec un message : mal réglé, il écrirait dans les tables d’un autre public.
+- **Retour après connexion.** Le bouton « Se connecter » ramène la personne sur la page des communicant·es (par défaut `…/p/10?style=singlePage`, réglage `connexion.retour` de la variante dans `widget.js`), jamais sur le planning de la version courante. `&page=N` dans l’adresse du widget remplace cette page par défaut.
 - **Des tables à part**, toutes préfixées `Communicants_` ; ce qui n’a pas ce préfixe est commun ou réservé à l’UB :
 
 | Table | Rôle | Créée par |

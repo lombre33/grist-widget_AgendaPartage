@@ -139,6 +139,9 @@ const VARIANTES = {
       boutons: ['sur'],
       annuaireACreer: true,
       creerColonneCibles: false,   // la structure des tables communes n’est jamais modifiée depuis cette variante
+      // Où Grist ramène la personne une fois connectée : la page des communicant·es de ce document (…/p/10). `&page=N` dans l’adresse du widget la remplace.
+      // Sans page par défaut, Grist la ramènerait à la première page du document, c’est-à-dire au planning de la version courante.
+      connexion: { retour: '/{doc}/Semaine-de-linnovation-2026/p/10?style=singlePage' },
     },
     libelles: {
       sur: { bouton: '✓ Assure la communication', badge: 'Assure la communication', resume: ['assure la communication', 'assurent la communication'] },
@@ -188,10 +191,9 @@ if (VARIANTE_CONNUE) {
   fusionner(CONFIG, VARIANTES[VARIANTE_DEMANDEE].config);
   fusionner(LIBELLES, VARIANTES[VARIANTE_DEMANDEE].libelles);
   fusionner(TEXTES, VARIANTES[VARIANTE_DEMANDEE].textes);
-  // Où Grist ramène la personne une fois connectée : la page de cette variante, dont le numéro (…/p/N dans l’adresse Grist) est donné par
-  // `&page=N` dans l’adresse du widget. Sans lui, Grist la ramène à la première page du document (ce ne serait pas la bonne : la page de la version courante).
+  // `&page=N` dans l’adresse du widget (N : …/p/N dans l’adresse Grist) remplace la page de retour par défaut de la variante (config.connexion.retour).
   const numeroPage = new URLSearchParams(location.search).get('page') || '';
-  CONFIG.connexion.retour = /^\d{1,5}$/.test(numeroPage) ? `/{doc}/Semaine-de-linnovation-2026/p/${numeroPage}?style=singlePage` : '';
+  if (/^\d{1,5}$/.test(numeroPage)) CONFIG.connexion.retour = `/{doc}/Semaine-de-linnovation-2026/p/${numeroPage}?style=singlePage`;
   // Repère pour style.css : les règles propres à une variante s’y accrochent (aucune n’existe pour la version courante, qui n’a pas cet attribut).
   document.documentElement.dataset.variante = VARIANTE_DEMANDEE;
 }
@@ -209,7 +211,7 @@ const CIBLES = [
 ];
 
 /* Numéro de version, affiché en bas de page : il permet de vérifier quelle version Grist a chargée (cache du navigateur). */
-const VERSION = `2026-11-03 · w${VARIANTE_CONNUE ? ` · ${VARIANTE_DEMANDEE} 3` : ''}`;
+const VERSION = `2026-11-03 · w${VARIANTE_CONNUE ? ` · ${VARIANTE_DEMANDEE} 4` : ''}`;
 
 const JOURS_SEMAINE = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
 const MOIS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
