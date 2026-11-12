@@ -132,6 +132,20 @@ describe('événements', () => {
     assert.equal(e.lieu, ''); assert.equal(e.debut, null); assert.equal(e.fin, null); assert.equal(e.lien, '');
   });
 
+  test('rendreEvenement : séance reportée (ni heure ni lieu), fin sans début, adresse seule : aucune erreur, aucune ligne vide', async () => {
+    const base = { id: 4, jour: '2026-11-24', titre: 'Atelier', sousTitre: '', type: 'Atelier', tempsFort: '', public: '', cibles: [], description: '', lien: '', lieu: '', ville: '', adresse: '', debut: null, fin: null };
+    const rendu = (surcharge) => f('rendreEvenement', { ...base, ...surcharge });
+    const reportee = await rendu({});
+    for (const classe of ['evt__heure', 'evt__lieu', 'evt__carte', 'evt__info']) assert.ok(!reportee.includes(classe), classe);
+    assert.ok(reportee.includes('Atelier'));
+    const finSeule = await rendu({ fin: { h: 13, m: 0 }, lieu: 'BU' });   // avant : TypeError, et tout le planning restait vide
+    assert.ok(!finSeule.includes('evt__heure')); assert.ok(finSeule.includes('evt__lieu'));
+    const adresseSeule = await rendu({ adresse: '1 rue X' });   // l'adresse reste dans « i », pas d'épingle sans texte
+    assert.ok(!adresseSeule.includes('evt__carte') && !adresseSeule.includes('evt__lieu')); assert.ok(adresseSeule.includes('evt__info'));
+    const villeSeule = await rendu({ ville: 'Talence' });
+    assert.ok(villeSeule.includes('Talence') && !villeSeule.includes('<br>'));
+  });
+
   test('lireCibles : liste de choix, tableau ou texte ; accents et casse ignorés, valeurs inconnues écartées, ordre des pastilles', async () => {
     assert.deepEqual(await f('lireCibles', ['L', 'Recherche', 'Pédagogie']), ['pedagogie', 'recherche']);
     assert.deepEqual(await f('lireCibles', ['étudiants', 'Entreprises']), ['etudiants', 'entreprises']);

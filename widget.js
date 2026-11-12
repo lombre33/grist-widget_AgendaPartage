@@ -1081,7 +1081,8 @@ function rendreActions(evenement) {
 
 /** Le lieu et la ville, en lien vers une carte (nouvel onglet) quand on sait où chercher. */
 function rendreLieu(e) {
-  const texteLieu = `${echapper(e.lieu)}${e.ville ? `<br>${echapper(e.ville)}` : ''}`;
+  const texteLieu = [e.lieu, e.ville].filter(Boolean).map(echapper).join('<br>');
+  if (!texteLieu) return '';   // ni lieu ni ville (événement reporté, par exemple) : rien à montrer, l’adresse éventuelle reste dans « i »
   const carte = lienCarte(e);
   if (!carte) return texteLieu;
   const nom = [e.lieu, e.ville].filter(Boolean).join(', ');
@@ -1089,9 +1090,10 @@ function rendreLieu(e) {
 }
 
 function rendreEvenement(e) {
-  const heure = e.fin
+  const heure = e.debut && e.fin
     ? `${formaterHeure(e.debut)}${NBSP}–${NBSP}${formaterHeure(e.fin)}`
-    : e.debut ? `À partir de ${formaterHeure(e.debut)}` : '';
+    : e.debut ? `À partir de ${formaterHeure(e.debut)}` : '';   // sans début, la fin seule n’est pas affichée (elle faisait échouer tout l’affichage)
+  const lieu = rendreLieu(e);
   const fort = e.tempsFort ? `<span class="evt__fort">Temps fort / ${echapper(e.tempsFort)}</span>` : '';
   const infos = rendreInfos(e);
   const infosOuvertes = etat.infos.has(e.id);
@@ -1103,11 +1105,11 @@ function rendreEvenement(e) {
     <article class="evt${e.tempsFort ? ' evt--fort' : ''}">
       ${fort}
       <div class="evt__ligne">
-        <p><span class="evt__heure">${heure}</span>${e.type ? `<span class="evt__type">${echapper(e.type)}</span>` : ''}</p>
+        <p>${heure ? `<span class="evt__heure">${heure}</span>` : ''}${e.type ? `<span class="evt__type">${echapper(e.type)}</span>` : ''}</p>
         ${boutonInfos}
       </div>
       <h3 class="evt__titre">${typo(e.titre)}${e.sousTitre ? `<span class="sr-only">. </span><span class="evt__sous">${typo(e.sousTitre)}</span>` : ''}</h3>
-      <p class="evt__lieu">${rendreLieu(e)}</p>
+      ${lieu ? `<p class="evt__lieu">${lieu}</p>` : ''}
       ${infosOuvertes ? infos : ''}
       ${rendreParticipants(e)}
       ${etat.ouverts.has(e.id) ? rendreListe(e) : ''}
